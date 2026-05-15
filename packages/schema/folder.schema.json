@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synccenter.beric.ca/schema/folder.json",
+  "title": "Folder",
+  "description": "A synced folder: per-host paths, optional cloud bisync, versioning, watcher settings.",
+  "type": "object",
+  "required": ["name", "ruleset", "type", "paths"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Stable identifier. Also used as the Syncthing folder ID."
+    },
+    "ruleset": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Ruleset name from rules/. Compiled per-folder into compiled/<name>/."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["send-receive", "send-only", "receive-only", "receive-encrypted"],
+      "description": "Syncthing folder type."
+    },
+    "paths": {
+      "type": "object",
+      "description": "Per-host absolute paths. Keys MUST match host names from hosts/.",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 },
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "cloud": {
+      "type": "object",
+      "description": "Optional rclone bisync cloud edge.",
+      "required": ["rclone_remote", "remote_path"],
+      "additionalProperties": false,
+      "properties": {
+        "rclone_remote": {
+          "type": "string",
+          "description": "rclone remote name as configured in rclone.conf on the QNAP."
+        },
+        "remote_path": { "type": "string" },
+        "bisync": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schedule": {
+              "type": "string",
+              "description": "Cron expression for the rclone bisync job."
+            },
+            "flags": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Flags passed to `rclone bisync`. Defaults are recommended; override here."
+            }
+          }
+        }
+      }
+    },
+    "versioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["off", "trash", "simple", "staggered"]
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "integer", "boolean"] }
+        }
+      }
+    },
+    "ignore_perms": {
+      "type": "boolean",
+      "description": "True for cross-platform folders (Mac/Win/Linux UID and mode bits differ)."
+    },
+    "fs_watcher_enabled": { "type": "boolean" },
+    "fs_watcher_delay_s": { "type": "integer", "minimum": 1, "maximum": 3600 }
+  }
+}

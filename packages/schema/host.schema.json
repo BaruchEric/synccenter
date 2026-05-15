@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synccenter.beric.ca/schema/host.json",
+  "title": "Host",
+  "description": "A device participating in the Syncthing mesh (and optionally rclone).",
+  "type": "object",
+  "required": ["name", "hostname", "os", "role", "syncthing"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Stable logical name. Used as the key in folders/*.paths."
+    },
+    "hostname": { "type": "string" },
+    "ip": {
+      "type": "string",
+      "description": "LAN IP, useful for direct connections when discovery is unreliable."
+    },
+    "os": {
+      "type": "string",
+      "enum": ["macos", "linux", "windows", "qnap"]
+    },
+    "role": {
+      "type": "string",
+      "enum": ["mesh-node", "hub", "cloud-edge"]
+    },
+    "ssh": {
+      "type": "object",
+      "description": "Optional SSH info for infra-deployer.",
+      "required": ["user"],
+      "additionalProperties": false,
+      "properties": {
+        "user": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "key_ref": {
+          "type": "string",
+          "description": "Reference to a private key path on the operator's machine (NOT committed)."
+        }
+      }
+    },
+    "syncthing": {
+      "type": "object",
+      "required": ["install_method", "api_url", "api_key_ref", "device_id_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "install_method": {
+          "type": "string",
+          "enum": ["brew", "docker", "qpkg", "synctrayzor"]
+        },
+        "api_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Reachable URL of this host's Syncthing REST API (e.g. http://127.0.0.1:8384 when tunnelled)."
+        },
+        "api_key_ref": {
+          "type": "string",
+          "pattern": "^secrets/.*\\.enc\\.(yaml|json)#.+$",
+          "description": "Pointer into a sops-encrypted file: path#key. Resolved at runtime."
+        },
+        "device_id_ref": {
+          "type": "string",
+          "pattern": "^secrets/.*\\.enc\\.(yaml|json)#.+$"
+        }
+      }
+    },
+    "rclone": {
+      "type": "object",
+      "description": "Optional rclone rcd info — typically only on the QNAP cloud-edge host.",
+      "required": ["rcd_url", "auth_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "rcd_url": { "type": "string", "format": "uri" },
+        "auth_ref": {
+          "type": "string",
+          "pattern": "^secrets/.*\\.enc\\.(yaml|json)#.+$"
+        }
+      }
+    }
+  }
+}

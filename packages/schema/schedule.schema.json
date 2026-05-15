@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synccenter.beric.ca/schema/schedule.json",
+  "title": "Schedule",
+  "description": "Aggregated job specs (currently: rclone bisync jobs) materialized into cron on the QNAP.",
+  "type": "object",
+  "required": ["jobs"],
+  "additionalProperties": false,
+  "properties": {
+    "jobs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bisyncJob" }
+    }
+  },
+  "$defs": {
+    "bisyncJob": {
+      "type": "object",
+      "required": ["folder", "schedule"],
+      "additionalProperties": false,
+      "properties": {
+        "folder": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Folder name from folders/. Must define a cloud: block."
+        },
+        "schedule": {
+          "type": "string",
+          "description": "Cron expression. 5 fields (m h dom mon dow)."
+        },
+        "flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  }
+}

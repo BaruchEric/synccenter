@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synccenter.beric.ca/schema/ruleset.json",
+  "title": "Ruleset",
+  "description": "A reusable set of ignore patterns. Compiles to .stignore (Syncthing) and filter.rclone (rclone).",
+  "type": "object",
+  "required": ["name", "version"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Stable identifier referenced by folders. Lowercase, kebab-case.",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "description": { "type": "string" },
+    "version": {
+      "type": "integer",
+      "description": "Schema version. Bump on breaking changes to this YAML's shape.",
+      "minimum": 1
+    },
+    "imports": {
+      "type": "array",
+      "description": "Resolved top-down by gitignore-importer; later entries override earlier (last match wins).",
+      "items": {
+        "type": "string",
+        "pattern": "^(github|file|ruleset|url)://"
+      }
+    },
+    "excludes": {
+      "type": "array",
+      "description": "Patterns to ignore. gitignore syntax (POSIX forward slashes).",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "includes": {
+      "type": "array",
+      "description": "Negations — keep these even if a previous rule excluded them. Prefix with '!'.",
+      "items": { "type": "string", "pattern": "^!" }
+    },
+    "engine_overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Engine-specific extras for cases the unified pattern can't express identically.",
+      "properties": {
+        "syncthing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "extra": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Appended verbatim to the generated .stignore (after the unified patterns)."
+            }
+          }
+        },
+        "rclone": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "extra": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[+-] " },
+              "description": "Appended verbatim to filter.rclone. Each line must start with '+ ' or '- '."
+            }
+          }
+        }
+      }
+    }
+  }
+}
