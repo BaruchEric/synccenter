@@ -33,6 +33,10 @@
       "properties": {
         "user": { "type": "string" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "host": {
+          "type": "string",
+          "description": "Hostname or IP to SSH into when it differs from the host's primary hostname/ip (e.g. a Parallels shared-network address)."
+        },
         "key_ref": {
           "type": "string",
           "description": "Reference to a private key path on the operator's machine (NOT committed)."
@@ -46,7 +50,15 @@
       "properties": {
         "install_method": {
           "type": "string",
-          "enum": ["brew", "docker", "qpkg", "synctrayzor"]
+          "enum": ["brew", "docker", "qpkg", "synctrayzor", "winget+nssm"]
+        },
+        "binary_path": {
+          "type": "string",
+          "description": "Absolute path to the Syncthing binary. Required for winget+nssm installs."
+        },
+        "home_dir": {
+          "type": "string",
+          "description": "Absolute path to Syncthing's config + database directory. Required for winget+nssm installs."
         },
         "api_url": {
           "type": "string",

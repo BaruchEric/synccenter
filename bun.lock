@@ -5,7 +5,9 @@
       "name": "synccenter",
       "devDependencies": {
         "@types/bun": "latest",
+        "ajv": "^8",
         "typescript": "^5.5.0",
+        "yaml": "^2.5",
       },
     },
     "apps/api": {
