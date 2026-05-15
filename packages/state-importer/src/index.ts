@@ -3,5 +3,6 @@ export { unifiedDiff } from "./diff.ts";
 export { matchRuleset } from "./ruleset-match.ts";
 export { importFolder } from "./import-folder.ts";
 export { importHost } from "./import-host.ts";
+export { importAll } from "./import-all.ts";
 export type { ImportResult, ImportResource, ImportStatus, HostInfo, ImportOpts } from "./types.ts";
 export { ImportError } from "./errors.ts";
