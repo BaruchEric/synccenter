@@ -97,11 +97,17 @@ describe("sc folders", () => {
   });
 });
 
-describe("sc placeholders", () => {
-  it("status exits 2 with a phase-3 message", () => {
+describe("sc remote-mode commands", () => {
+  it("status exits 2 with an actionable error when no --api / SC_API_URL", () => {
     const r = runCli(["status"]);
     expect(r.status).toBe(2);
-    expect(r.stderr).toContain("Phase 3");
+    expect(r.stderr).toContain("SC_API_URL");
+  });
+
+  it("apply exits 2 without a token even if --api is set", () => {
+    const r = runCli(["--api", "http://localhost:1", "apply", "shared"]);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/SC_TOKEN|SC_API_TOKEN/);
   });
 });
 
