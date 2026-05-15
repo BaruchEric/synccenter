@@ -1,0 +1,12 @@
+name: with-overrides
+version: 1
+excludes:
+  - "**/*.log"
+engine_overrides:
+  syncthing:
+    extra:
+      - "(?d)*.bak"
+  rclone:
+    extra:
+      - "+ *.important"
+      - "- *"

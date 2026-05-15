@@ -1,0 +1,8 @@
+name: base-binaries
+version: 1
+description: Common OS-cruft excludes.
+excludes:
+  - .DS_Store
+  - Thumbs.db
+  - "**/*.tmp"
+  - "**/*.swp"

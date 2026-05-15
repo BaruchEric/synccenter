@@ -1,0 +1,4 @@
+name: with-divergent
+version: 1
+excludes:
+  - "(?d)*.bak"

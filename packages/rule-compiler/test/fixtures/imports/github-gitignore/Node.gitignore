@@ -1,0 +1,16 @@
+# Minimal Node.gitignore subset for hermetic tests.
+# The real importer caches the full file from github/gitignore weekly.
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+
+# Coverage
+coverage/

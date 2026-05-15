@@ -1,0 +1,13 @@
+name: dev-monorepo
+version: 1
+description: Test fixture mirroring the real dev-monorepo ruleset.
+imports:
+  - ruleset://base-binaries
+  - github://github/gitignore/Node
+excludes:
+  - "**/node_modules/"
+  - "**/dist/"
+  - "**/.env"
+  - "**/.env.*"
+includes:
+  - "!**/.env.example"

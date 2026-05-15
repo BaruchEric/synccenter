@@ -8,10 +8,14 @@
     "packages/*"
   ],
   "scripts": {
-    "lint": "echo 'lint: configure in phase 2'",
-    "typecheck": "echo 'typecheck: configure in phase 2'",
-    "test": "echo 'test: configure in phase 2'",
-    "build": "echo 'build: configure in phase 2'"
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test",
+    "lint": "echo 'lint: configure in phase 3'",
+    "build": "bun run --filter '*' build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.5.0"
   },
   "engines": {
     "bun": ">=1.1.0"
