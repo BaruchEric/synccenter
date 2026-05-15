@@ -1,0 +1,260 @@
+openapi: 3.1.0
+info:
+  title: SyncCenter API
+  version: 0.0.1
+  description: |
+    Read-side and skeleton write-side for the SyncCenter command center. Mutating endpoints
+    that need the Syncthing/rclone adapters return 501 until Phase 3 wiring is complete.
+
+servers:
+  - url: https://sync.beric.ca
+    description: Production
+  - url: http://localhost:3000
+    description: Local dev
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: API is up
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /metrics:
+    get:
+      summary: Prometheus exposition
+      security: []
+      responses:
+        "200":
+          description: Prom text format
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /folders:
+    get:
+      summary: List folders
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [folders]
+                properties:
+                  folders:
+                    type: array
+                    items: { type: string }
+
+  /folders/{name}:
+    get:
+      summary: Get a folder definition
+      parameters:
+        - { in: path, name: name, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Folder" } }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /folders/{name}/pause:
+    post:
+      summary: Pause sync for a folder (Phase 3 wiring)
+      parameters: [{ in: path, name: name, required: true, schema: { type: string } }]
+      responses: { "501": { $ref: "#/components/responses/NotImplemented" } }
+
+  /folders/{name}/resume:
+    post:
+      summary: Resume sync for a folder (Phase 3 wiring)
+      parameters: [{ in: path, name: name, required: true, schema: { type: string } }]
+      responses: { "501": { $ref: "#/components/responses/NotImplemented" } }
+
+  /folders/{name}/bisync:
+    post:
+      summary: Trigger an rclone bisync run (Phase 3 wiring)
+      parameters: [{ in: path, name: name, required: true, schema: { type: string } }]
+      responses: { "501": { $ref: "#/components/responses/NotImplemented" } }
+
+  /rules:
+    get:
+      summary: List rulesets
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items: { type: string }
+
+  /rules/{name}:
+    get:
+      summary: Get a parsed ruleset
+      parameters: [{ in: path, name: name, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Ruleset" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /rules/{name}/compile:
+    post:
+      summary: Compile a ruleset to .stignore + rclone filter
+      parameters:
+        - { in: path, name: name, required: true, schema: { type: string } }
+        - { in: query, name: allowDivergent, schema: { type: boolean } }
+      responses:
+        "200":
+          description: compiled
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/CompileResult" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /hosts:
+    get:
+      summary: List host manifests
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hosts:
+                    type: array
+                    items: { type: string }
+
+  /hosts/{name}:
+    get:
+      summary: Get a host manifest
+      parameters: [{ in: path, name: name, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Host" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /conflicts:
+    get:
+      summary: List unresolved conflicts
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conflicts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Conflict" }
+
+  /jobs:
+    get:
+      summary: List in-flight jobs
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: { type: object }
+
+  /apply-history:
+    get:
+      summary: Recent apply operations (last 50)
+      responses:
+        "200":
+          description: ok
+
+  /apply:
+    post:
+      summary: Apply a config change to live hosts (Phase 3 wiring)
+      responses: { "501": { $ref: "#/components/responses/NotImplemented" } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json: { schema: { $ref: "#/components/schemas/Error" } }
+    BadRequest:
+      description: Bad request
+      content:
+        application/json: { schema: { $ref: "#/components/schemas/Error" } }
+    NotImplemented:
+      description: Not implemented yet
+      content:
+        application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  schemas:
+    Health:
+      type: object
+      required: [ok, version]
+      properties:
+        ok: { type: boolean }
+        version: { type: string }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Folder:
+      type: object
+      description: Mirrors packages/schema/folder.schema.json.
+
+    Ruleset:
+      type: object
+      description: Mirrors packages/schema/ruleset.schema.json.
+
+    Host:
+      type: object
+      description: Mirrors packages/schema/host.schema.json.
+
+    CompileResult:
+      type: object
+      required: [stignore, rcloneFilter, warnings, source]
+      properties:
+        stignore: { type: string }
+        rcloneFilter: { type: string }
+        warnings:
+          type: array
+          items: { type: string }
+        source: { type: string }
+
+    Conflict:
+      type: object
+      required: [id, folder, path, detected_at]
+      properties:
+        id: { type: integer }
+        folder: { type: string }
+        path: { type: string }
+        detected_at: { type: string, format: date-time }

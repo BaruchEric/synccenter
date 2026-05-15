@@ -1,0 +1,21 @@
+{
+  "name": "@synccenter/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun build src/index.ts --target=bun --outdir dist"
+  },
+  "dependencies": {
+    "@synccenter/rule-compiler": "workspace:*",
+    "express": "^4.21.0",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21"
+  }
+}
