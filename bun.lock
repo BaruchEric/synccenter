@@ -71,6 +71,16 @@
       "name": "@synccenter/adapters",
       "version": "0.0.1",
     },
+    "packages/apply-planner": {
+      "name": "@synccenter/apply-planner",
+      "version": "0.0.1",
+      "dependencies": {
+        "@synccenter/adapters": "workspace:*",
+        "@synccenter/rule-compiler": "workspace:*",
+        "ajv": "^8.12.0",
+        "yaml": "^2.5.0",
+      },
+    },
     "packages/importers": {
       "name": "@synccenter/importers",
       "version": "0.0.1",
@@ -259,6 +269,8 @@
     "@synccenter/adapters": ["@synccenter/adapters@workspace:packages/adapters"],
 
     "@synccenter/api": ["@synccenter/api@workspace:apps/api"],
+
+    "@synccenter/apply-planner": ["@synccenter/apply-planner@workspace:packages/apply-planner"],
 
     "@synccenter/cli": ["@synccenter/cli@workspace:apps/cli"],
 
