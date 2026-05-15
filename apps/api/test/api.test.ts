@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SyncthingClient, SyncthingError } from "@synccenter/adapters";
+import { RcloneClient, RcloneError, SyncthingClient, SyncthingError } from "@synccenter/adapters";
 import { buildApp } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { HostRegistry } from "../src/registry.ts";
@@ -80,12 +80,60 @@ class FakeSyncthing {
   }
 }
 
+class FakeRclone {
+  public readonly calls: FakeCall[] = [];
+  public failNext: Error | null = null;
+  public nextBisyncResult: Record<string, unknown> = { jobid: 7 };
+
+  async getVersion() {
+    this.calls.push({ method: "getVersion", args: [] });
+    if (this.shouldFail()) throw this.popFail();
+    return { version: "v1.69.0", goVersion: "go1.22", os: "linux", arch: "amd64" };
+  }
+  async listRemotes() {
+    this.calls.push({ method: "listRemotes", args: [] });
+    if (this.shouldFail()) throw this.popFail();
+    return { remotes: ["gdrive", "b2"] };
+  }
+  async jobStatus(jobid: number) {
+    this.calls.push({ method: "jobStatus", args: [jobid] });
+    if (this.shouldFail()) throw this.popFail();
+    return {
+      id: jobid,
+      startTime: "2026-05-14T00:00:00Z",
+      duration: 1,
+      finished: true,
+      success: true,
+    };
+  }
+  async getStats(group?: string) {
+    this.calls.push({ method: "getStats", args: [group] });
+    if (this.shouldFail()) throw this.popFail();
+    return { bytes: 0, checks: 0, elapsedTime: 0, errors: 0 };
+  }
+  async bisync(params: unknown) {
+    this.calls.push({ method: "bisync", args: [params] });
+    if (this.shouldFail()) throw this.popFail();
+    return this.nextBisyncResult;
+  }
+
+  private shouldFail(): boolean {
+    return this.failNext !== null;
+  }
+  private popFail(): Error {
+    const e = this.failNext!;
+    this.failNext = null;
+    return e;
+  }
+}
+
 let tmpRoot: string;
 let configDir: string;
 let server: Server;
 let baseUrl: string;
 let macFake: FakeSyncthing;
 let qnapFake: FakeSyncthing;
+let rcloneFake: FakeRclone;
 
 beforeAll(async () => {
   tmpRoot = mkdtempSync(join(tmpdir(), "synccenter-api-"));
@@ -110,6 +158,19 @@ beforeAll(async () => {
       "paths:",
       "  mac-studio: /Users/eric/Sync/shared",
       "  qnap-ts453d: /share/Sync/shared",
+      "cloud:",
+      "  rclone_remote: gdrive",
+      "  remote_path: sync/shared",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(configDir, "folders", "no-cloud.yaml"),
+    [
+      "name: no-cloud",
+      "ruleset: base-binaries",
+      "type: send-receive",
+      "paths:",
+      "  mac-studio: /Users/eric/Sync/local",
     ].join("\n"),
   );
   writeFileSync(
@@ -143,6 +204,7 @@ beforeAll(async () => {
 
   macFake = new FakeSyncthing();
   qnapFake = new FakeSyncthing();
+  rcloneFake = new FakeRclone();
   const clients = new Map<string, SyncthingClient>();
   clients.set("mac-studio", macFake as unknown as SyncthingClient);
   clients.set("qnap-ts453d", qnapFake as unknown as SyncthingClient);
@@ -154,7 +216,7 @@ beforeAll(async () => {
     SC_DB_PATH: ":memory:",
   });
   const registry = new HostRegistry({ cfg, clients });
-  const { app } = buildApp({ cfg, registry });
+  const { app } = buildApp({ cfg, registry, rclone: rcloneFake as unknown as RcloneClient });
 
   server = await new Promise<Server>((resolve) => {
     const s = app.listen(0, () => resolve(s));
@@ -173,6 +235,9 @@ beforeEach(() => {
   qnapFake.calls.length = 0;
   macFake.failNext = null;
   qnapFake.failNext = null;
+  rcloneFake.calls.length = 0;
+  rcloneFake.failNext = null;
+  rcloneFake.nextBisyncResult = { jobid: 7 };
 });
 
 async function call(path: string, init: RequestInit = {}, withAuth = true): Promise<Response> {
@@ -199,7 +264,7 @@ describe("public + auth", () => {
 describe("config-repo reads", () => {
   it("GET /folders", async () => {
     const r = await call("/folders");
-    expect(await r.json()).toEqual({ folders: ["shared"] });
+    expect(await r.json()).toEqual({ folders: ["no-cloud", "shared"] });
   });
 
   it("GET /folders/:name", async () => {
@@ -344,10 +409,96 @@ describe("legacy / stubbed", () => {
     const r = await call("/apply", { method: "POST" });
     expect(r.status).toBe(501);
   });
+});
 
-  it("POST /folders/:name/bisync stays 501 until rclone adapter lands", async () => {
+describe("rclone routes", () => {
+  it("GET /rclone/version proxies to rclone client", async () => {
+    const r = await call("/rclone/version");
+    expect(r.status).toBe(200);
+    expect((await r.json()) as { version: string }).toMatchObject({ version: "v1.69.0" });
+    expect(rcloneFake.calls[0]!.method).toBe("getVersion");
+  });
+
+  it("GET /rclone/remotes returns the configured list", async () => {
+    const r = await call("/rclone/remotes");
+    expect(await r.json()).toEqual({ remotes: ["gdrive", "b2"] });
+  });
+
+  it("GET /rclone/jobs/:jobid passes the jobid through", async () => {
+    const r = await call("/rclone/jobs/42");
+    expect(r.status).toBe(200);
+    expect(rcloneFake.calls[0]).toEqual({ method: "jobStatus", args: [42] });
+  });
+
+  it("GET /rclone/jobs/:jobid 400s on a bad jobid", async () => {
+    const r = await call("/rclone/jobs/not-a-number");
+    expect(r.status).toBe(400);
+  });
+
+  it("GET /rclone/stats forwards group query param", async () => {
+    await call("/rclone/stats?group=foo");
+    expect(rcloneFake.calls[0]).toEqual({ method: "getStats", args: ["foo"] });
+  });
+
+  it("returns 502 when the rclone client throws RcloneError", async () => {
+    rcloneFake.failNext = new RcloneError("rcd down", 503, "core/version");
+    const r = await call("/rclone/version");
+    expect(r.status).toBe(502);
+    expect((await r.json()) as { upstreamStatus: number }).toMatchObject({ upstreamStatus: 503 });
+  });
+});
+
+describe("folder bisync", () => {
+  it("404s for a missing folder", async () => {
+    const r = await call("/folders/nonexistent/bisync", { method: "POST" });
+    expect(r.status).toBe(404);
+  });
+
+  it("400s when the folder has no cloud edge", async () => {
+    const r = await call("/folders/no-cloud/bisync", { method: "POST" });
+    expect(r.status).toBe(400);
+    expect((await r.json()) as { error: string }).toMatchObject({
+      error: expect.stringContaining("no cloud edge"),
+    });
+  });
+
+  it("409s when the compiled filter is missing on disk", async () => {
     const r = await call("/folders/shared/bisync", { method: "POST" });
-    expect(r.status).toBe(501);
+    expect(r.status).toBe(409);
+    expect((await r.json()) as { error: string }).toMatchObject({
+      error: expect.stringContaining("filter.rclone missing"),
+    });
+  });
+
+  it("triggers a bisync with the right path1/path2/filtersFile once compiled", async () => {
+    // First materialize compiled/<folder>/filter.rclone via apply.
+    const applyR = await call("/folders/shared/apply", { method: "POST" });
+    expect(applyR.status).toBe(200);
+    // (apply writes nothing to disk in this implementation — it pushes to Syncthing.
+    //  We need to write the compiled filter to disk manually for the bisync test.)
+    mkdirSync(join(configDir, "compiled", "shared"), { recursive: true });
+    writeFileSync(join(configDir, "compiled", "shared", "filter.rclone"), "- .DS_Store\n+ **\n");
+
+    rcloneFake.calls.length = 0;
+    const r = await call("/folders/shared/bisync?async=true&dryRun=true", { method: "POST" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { jobid?: number; path1: string; path2: string };
+    expect(body.jobid).toBe(7);
+    expect(body.path2).toBe("gdrive:sync/shared");
+    // path1 should be the QNAP path (the cloud-edge host).
+    expect(body.path1).toBe("/share/Sync/shared");
+
+    const bisyncCall = rcloneFake.calls.find((c) => c.method === "bisync")!;
+    const args = bisyncCall.args[0] as { filtersFile: string; async: boolean; dryRun: boolean };
+    expect(args.filtersFile).toBe(join(configDir, "compiled", "shared", "filter.rclone"));
+    expect(args.async).toBe(true);
+    expect(args.dryRun).toBe(true);
+  });
+
+  it("returns 502 when rclone errors during bisync", async () => {
+    rcloneFake.failNext = new RcloneError("workdir locked", 400, "sync/bisync");
+    const r = await call("/folders/shared/bisync", { method: "POST" });
+    expect(r.status).toBe(502);
   });
 });
 

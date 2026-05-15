@@ -1,9 +1,9 @@
 import { Router, type Response } from "express";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { SyncthingError } from "@synccenter/adapters";
+import { RcloneClient, RcloneError, SyncthingError } from "@synccenter/adapters";
 import { compile, CompileError } from "@synccenter/rule-compiler";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
@@ -14,9 +14,22 @@ interface FolderManifest {
   ruleset: string;
   type: string;
   paths: Record<string, string>;
+  cloud?: {
+    rclone_remote: string;
+    remote_path: string;
+    bisync?: {
+      schedule?: string;
+      flags?: string[];
+    };
+  };
 }
 
-export function foldersRouter(cfg: ApiConfig, registry: HostRegistry, db: Db): Router {
+export function foldersRouter(
+  cfg: ApiConfig,
+  registry: HostRegistry,
+  db: Db,
+  rclone: RcloneClient | null,
+): Router {
   const r = Router();
 
   r.get("/folders", (_req, res) => {
@@ -168,6 +181,82 @@ export function foldersRouter(cfg: ApiConfig, registry: HostRegistry, db: Db): R
       perHost,
       warnings: compiled.warnings,
     });
+  });
+
+  r.post("/folders/:name/bisync", async (req, res) => {
+    if (!rclone) {
+      res.status(503).json({ error: "rclone is not configured (set SC_RCLONE_URL)" });
+      return;
+    }
+    const m = loadFolder(cfg.foldersDir, req.params.name);
+    if (!m) {
+      res.status(404).json({ error: `folder not found: ${req.params.name}` });
+      return;
+    }
+    if (!m.cloud) {
+      res.status(400).json({ error: `folder ${m.name} has no cloud edge configured` });
+      return;
+    }
+
+    // Find the cloud-edge host — the path on this host is the rcd-local path1.
+    const cloudHostName = registry.list().find((h) => registry.manifest(h)?.role === "cloud-edge");
+    if (!cloudHostName) {
+      res.status(400).json({ error: "no host with role=cloud-edge is registered" });
+      return;
+    }
+    const path1 = m.paths[cloudHostName];
+    if (!path1) {
+      res
+        .status(400)
+        .json({ error: `folder ${m.name} has no path entry for cloud-edge host ${cloudHostName}` });
+      return;
+    }
+
+    const filterPath = join(cfg.compiledDir, m.name, "filter.rclone");
+    const filterExists = existsSync(filterPath);
+    if (!filterExists) {
+      res.status(409).json({
+        error: `compiled filter.rclone missing at ${filterPath}. Run POST /folders/${m.name}/apply first.`,
+      });
+      return;
+    }
+
+    const path2 = `${m.cloud.rclone_remote}:${m.cloud.remote_path}`;
+    const async = req.query.async === "true";
+    const dryRun = req.query.dryRun === "true";
+    const resync = req.query.resync === "true";
+
+    try {
+      const out = await rclone.bisync({
+        path1,
+        path2,
+        filtersFile: filterPath,
+        ...(async ? { async: true } : {}),
+        ...(dryRun ? { dryRun: true } : {}),
+        ...(resync ? { resync: true } : {}),
+      });
+      db.run(
+        `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
+         VALUES (?, 'api-bearer', 'api', 'folder', ?, ?, 'ok', ?)`,
+        [
+          new Date().toISOString(),
+          m.name,
+          "bisync-trigger",
+          `path1=${path1} path2=${path2}${async ? " async" : ""}${dryRun ? " dryRun" : ""}${resync ? " resync" : ""}`,
+        ],
+      );
+      res.json({ folder: m.name, path1, path2, ...out });
+    } catch (err) {
+      if (err instanceof RcloneError) {
+        res.status(502).json({
+          error: err.message,
+          endpoint: err.endpoint,
+          upstreamStatus: err.status,
+        });
+        return;
+      }
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   return r;

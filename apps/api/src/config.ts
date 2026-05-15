@@ -11,6 +11,12 @@ export interface ApiConfig {
   apiToken: string;
   port: number;
   dbPath: string;
+  rclone?: {
+    url: string;
+    username?: string;
+    password?: string;
+    bearerToken?: string;
+  };
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -30,6 +36,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   const dbPath = env.SC_DB_PATH ?? ":memory:";
 
+  const rclone = env.SC_RCLONE_URL
+    ? {
+        url: env.SC_RCLONE_URL,
+        ...(env.SC_RCLONE_USER ? { username: env.SC_RCLONE_USER } : {}),
+        ...(env.SC_RCLONE_PASS ? { password: env.SC_RCLONE_PASS } : {}),
+        ...(env.SC_RCLONE_BEARER ? { bearerToken: env.SC_RCLONE_BEARER } : {}),
+      }
+    : undefined;
+
   return {
     configDir: absConfig,
     rulesDir: resolve(absConfig, "rules"),
@@ -40,6 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     apiToken,
     port,
     dbPath,
+    ...(rclone ? { rclone } : {}),
   };
 }
 

@@ -2,8 +2,6 @@ import { Router } from "express";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 
-const NOT_IMPL_RCLONE = "needs the rclone adapter (Phase 3 wiring) — not yet implemented";
-
 export function systemRouter(_cfg: ApiConfig, db: Db): Router {
   const r = Router();
 
@@ -34,10 +32,6 @@ export function systemRouter(_cfg: ApiConfig, db: Db): Router {
     res.status(501).json({
       error: "POST /apply is a multi-resource batch — use /folders/:name/apply for per-folder apply, or wait for batch support",
     });
-  });
-
-  r.post("/folders/:name/bisync", (_req, res) => {
-    res.status(501).json({ error: NOT_IMPL_RCLONE });
   });
 
   return r;

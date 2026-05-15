@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./syncthing": "./src/syncthing/index.ts"
+    "./syncthing": "./src/syncthing/index.ts",
+    "./rclone": "./src/rclone/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
