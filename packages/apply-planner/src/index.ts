@@ -1,4 +1,5 @@
 export { plan } from "./plan.ts";
+export { apply } from "./apply.ts";
 export { renderCrontab } from "./render-crontab.ts";
 export { mapPolicy } from "./conflict.ts";
 export { buildSchedulePlan } from "./schedule.ts";
