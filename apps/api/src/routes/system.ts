@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 
-const NOT_IMPL = "this endpoint needs the Syncthing/rclone adapters (Phase 3 wiring) — not yet implemented";
+const NOT_IMPL_RCLONE = "needs the rclone adapter (Phase 3 wiring) — not yet implemented";
 
 export function systemRouter(_cfg: ApiConfig, db: Db): Router {
   const r = Router();
@@ -17,7 +17,6 @@ export function systemRouter(_cfg: ApiConfig, db: Db): Router {
   });
 
   r.get("/jobs", (_req, res) => {
-    // No job runner yet; returns empty list so the UI/CLI can be stubbed against it.
     res.json({ jobs: [] });
   });
 
@@ -32,19 +31,13 @@ export function systemRouter(_cfg: ApiConfig, db: Db): Router {
   });
 
   r.post("/apply", (_req, res) => {
-    res.status(501).json({ error: NOT_IMPL });
-  });
-
-  r.post("/folders/:name/pause", (_req, res) => {
-    res.status(501).json({ error: NOT_IMPL });
-  });
-
-  r.post("/folders/:name/resume", (_req, res) => {
-    res.status(501).json({ error: NOT_IMPL });
+    res.status(501).json({
+      error: "POST /apply is a multi-resource batch — use /folders/:name/apply for per-folder apply, or wait for batch support",
+    });
   });
 
   r.post("/folders/:name/bisync", (_req, res) => {
-    res.status(501).json({ error: NOT_IMPL });
+    res.status(501).json({ error: NOT_IMPL_RCLONE });
   });
 
   return r;

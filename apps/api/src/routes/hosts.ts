@@ -1,23 +1,16 @@
 import { Router } from "express";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { SyncthingError } from "@synccenter/adapters";
 import type { ApiConfig } from "../config.ts";
+import { HostRegistry, HostRegistryError } from "../registry.ts";
 
-export function hostsRouter(cfg: ApiConfig): Router {
+export function hostsRouter(cfg: ApiConfig, registry: HostRegistry): Router {
   const r = Router();
 
   r.get("/hosts", (_req, res) => {
-    let names: string[] = [];
-    try {
-      names = readdirSync(cfg.hostsDir)
-        .filter((f) => f.endsWith(".yaml"))
-        .map((f) => f.slice(0, -".yaml".length))
-        .sort();
-    } catch {
-      // empty hosts dir is fine
-    }
-    res.json({ hosts: names });
+    res.json({ hosts: registry.list() });
   });
 
   r.get("/hosts/:name", (req, res) => {
@@ -36,5 +29,41 @@ export function hostsRouter(cfg: ApiConfig): Router {
     }
   });
 
+  r.get("/hosts/:name/status", async (req, res) => {
+    try {
+      const client = registry.client(req.params.name);
+      const [version, status] = await Promise.all([client.getVersion(), client.getStatus()]);
+      res.json({ host: req.params.name, online: true, version, status });
+    } catch (err) {
+      handleSyncthingErr(res, err, req.params.name);
+    }
+  });
+
+  r.get("/hosts/:name/folders", async (req, res) => {
+    try {
+      const folders = await registry.client(req.params.name).listFolders();
+      res.json({ host: req.params.name, folders });
+    } catch (err) {
+      handleSyncthingErr(res, err, req.params.name);
+    }
+  });
+
   return r;
+}
+
+function handleSyncthingErr(res: import("express").Response, err: unknown, host: string): void {
+  if (err instanceof HostRegistryError) {
+    res.status(err.code === "unknown-host" ? 404 : 503).json({ error: err.message, code: err.code });
+    return;
+  }
+  if (err instanceof SyncthingError) {
+    res.status(502).json({
+      error: err.message,
+      host,
+      endpoint: err.endpoint,
+      upstreamStatus: err.status,
+    });
+    return;
+  }
+  res.status(500).json({ error: (err as Error).message ?? "internal error" });
 }
