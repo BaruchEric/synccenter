@@ -3,6 +3,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { version as PKG_VERSION } from "../package.json" with { type: "json" };
 import type { ApiClient } from "./api.ts";
 import { TOOLS, requireConfirm, type ToolDef } from "./tools.ts";
 
@@ -12,7 +13,7 @@ export interface ServerDeps {
 
 export function buildMcpServer({ api }: ServerDeps): Server {
   const server = new Server(
-    { name: "synccenter", version: "0.0.1" },
+    { name: "synccenter", version: PKG_VERSION },
     { capabilities: { tools: {} } },
   );
 

@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolveScPaths, ScError } from "../lib/config.ts";
 import { emit, fail, type OutputCtx } from "../lib/output.ts";
@@ -22,7 +22,7 @@ export function registerFoldersCommand(program: Command): void {
         const paths = resolveScPaths({ explicitDir: globalConfig(cmd) });
         const names = readdirSync(paths.foldersDir)
           .filter((f) => f.endsWith(".yaml"))
-          .map((f) => f.slice(0, -".yaml".length))
+          .map((f) => basename(f, ".yaml"))
           .sort();
         emit(ctx, names.length ? names.join("\n") : "(no folders)", { folders: names });
       } catch (err) {

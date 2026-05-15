@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { compile, loadRuleset } from "@synccenter/rule-compiler";
 import { resolveScPaths, ScError } from "../lib/config.ts";
 import { gitShortSha } from "../lib/git.ts";
@@ -132,7 +132,7 @@ function listRulesets(rulesDir: string): string[] {
   }
   return entries
     .filter((f) => f.endsWith(".yaml") && f !== "README.md")
-    .map((f) => f.slice(0, -".yaml".length))
+    .map((f) => basename(f, ".yaml"))
     .sort();
 }
 

@@ -1,8 +1,7 @@
 import { Router } from "express";
-import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 
-export function systemRouter(_cfg: ApiConfig, db: Db): Router {
+export function systemRouter(db: Db): Router {
   const r = Router();
 
   r.get("/conflicts", (_req, res) => {

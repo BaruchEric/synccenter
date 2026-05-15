@@ -1,5 +1,6 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import { RcloneClient } from "@synccenter/adapters";
+import { version as PKG_VERSION } from "../package.json" with { type: "json" };
 import { bearerAuth } from "./auth.ts";
 import type { ApiConfig } from "./config.ts";
 import { openDb, type Db } from "./db.ts";
@@ -49,7 +50,7 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
 
   // Public — no auth.
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, version: "0.0.1" });
+    res.json({ ok: true, version: PKG_VERSION });
   });
   app.get("/metrics", metricsHandlerFactory(cfg, reg, database));
 
@@ -60,7 +61,7 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
   app.use("/", hostsRouter(cfg, reg));
   app.use("/", rcloneRouter(rcloneClient));
   app.use("/", importsRouter({ cfg, ...(importerFetch ? { importerFetch } : {}) }));
-  app.use("/", systemRouter(cfg, database));
+  app.use("/", systemRouter(database));
 
   app.use((_req, res) => res.status(404).json({ error: "not found" }));
 
