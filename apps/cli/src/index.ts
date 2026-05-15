@@ -6,6 +6,7 @@ import { registerFoldersCommand } from "./commands/folders.ts";
 import { registerImportsCommand } from "./commands/imports.ts";
 import { registerRemoteCommands } from "./commands/remote.ts";
 import { registerStateCommand } from "./commands/state.ts";
+import { registerScheduleCommand } from "./commands/schedule.ts";
 
 const program = new Command();
 
@@ -24,6 +25,7 @@ registerFoldersCommand(program);
 registerImportsCommand(program);
 registerRemoteCommands(program);
 registerStateCommand(program);
+registerScheduleCommand(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   const msg = err instanceof Error ? err.message : String(err);
