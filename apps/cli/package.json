@@ -1,0 +1,19 @@
+{
+  "name": "@synccenter/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "sc": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun build src/index.ts --compile --outfile dist/sc"
+  },
+  "dependencies": {
+    "@synccenter/rule-compiler": "workspace:*",
+    "commander": "^12.1.0",
+    "yaml": "^2.5.0"
+  }
+}
