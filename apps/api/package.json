@@ -11,6 +11,8 @@
     "build": "bun build src/index.ts --target=bun --outdir dist"
   },
   "dependencies": {
+    "@synccenter/adapters": "workspace:*",
+    "@synccenter/importers": "workspace:*",
     "@synccenter/rule-compiler": "workspace:*",
     "express": "^4.21.0",
     "yaml": "^2.5.0"

@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { registerRulesCommand } from "./commands/rules.ts";
 import { registerFoldersCommand } from "./commands/folders.ts";
+import { registerImportsCommand } from "./commands/imports.ts";
 import { registerPlaceholders } from "./commands/placeholders.ts";
 
 const program = new Command();
@@ -16,6 +17,7 @@ program
 
 registerRulesCommand(program);
 registerFoldersCommand(program);
+registerImportsCommand(program);
 registerPlaceholders(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {

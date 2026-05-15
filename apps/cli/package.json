@@ -12,6 +12,7 @@
     "build": "bun build src/index.ts --compile --outfile dist/sc"
   },
   "dependencies": {
+    "@synccenter/importers": "workspace:*",
     "@synccenter/rule-compiler": "workspace:*",
     "commander": "^12.1.0",
     "yaml": "^2.5.0"

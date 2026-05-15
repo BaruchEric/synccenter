@@ -7,6 +7,7 @@ import { metricsHandler } from "./metrics.ts";
 import { foldersRouter } from "./routes/folders.ts";
 import { rulesRouter } from "./routes/rules.ts";
 import { hostsRouter } from "./routes/hosts.ts";
+import { importsRouter } from "./routes/imports.ts";
 import { rcloneRouter } from "./routes/rclone.ts";
 import { systemRouter } from "./routes/system.ts";
 import { HostRegistry } from "./registry.ts";
@@ -17,6 +18,8 @@ export interface BuildAppDeps {
   registry?: HostRegistry;
   /** Optional rclone client injection. `null` to explicitly opt out of rclone routes. */
   rclone?: RcloneClient | null;
+  /** Injectable fetch for the gitignore-importer (tests). */
+  importerFetch?: typeof fetch;
 }
 
 export interface BuiltApp {
@@ -26,7 +29,7 @@ export interface BuiltApp {
   rclone: RcloneClient | null;
 }
 
-export function buildApp({ cfg, db, registry, rclone }: BuildAppDeps): BuiltApp {
+export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppDeps): BuiltApp {
   const database = db ?? openDb(cfg.dbPath);
   const reg = registry ?? new HostRegistry({ cfg });
   const rcloneClient =
@@ -56,6 +59,7 @@ export function buildApp({ cfg, db, registry, rclone }: BuildAppDeps): BuiltApp 
   app.use("/", rulesRouter(cfg));
   app.use("/", hostsRouter(cfg, reg));
   app.use("/", rcloneRouter(rcloneClient));
+  app.use("/", importsRouter({ cfg, ...(importerFetch ? { importerFetch } : {}) }));
   app.use("/", systemRouter(cfg, database));
 
   app.use((_req, res) => res.status(404).json({ error: "not found" }));

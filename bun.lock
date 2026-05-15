@@ -12,6 +12,8 @@
       "name": "@synccenter/api",
       "version": "0.0.1",
       "dependencies": {
+        "@synccenter/adapters": "workspace:*",
+        "@synccenter/importers": "workspace:*",
         "@synccenter/rule-compiler": "workspace:*",
         "express": "^4.21.0",
         "yaml": "^2.5.0",
@@ -27,6 +29,7 @@
         "sc": "./src/index.ts",
       },
       "dependencies": {
+        "@synccenter/importers": "workspace:*",
         "@synccenter/rule-compiler": "workspace:*",
         "commander": "^12.1.0",
         "yaml": "^2.5.0",
@@ -35,6 +38,13 @@
     "packages/adapters": {
       "name": "@synccenter/adapters",
       "version": "0.0.1",
+    },
+    "packages/importers": {
+      "name": "@synccenter/importers",
+      "version": "0.0.1",
+      "dependencies": {
+        "yaml": "^2.5.0",
+      },
     },
     "packages/rule-compiler": {
       "name": "@synccenter/rule-compiler",
@@ -50,6 +60,8 @@
     "@synccenter/api": ["@synccenter/api@workspace:apps/api"],
 
     "@synccenter/cli": ["@synccenter/cli@workspace:apps/cli"],
+
+    "@synccenter/importers": ["@synccenter/importers@workspace:packages/importers"],
 
     "@synccenter/rule-compiler": ["@synccenter/rule-compiler@workspace:packages/rule-compiler"],
 

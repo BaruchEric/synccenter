@@ -30,7 +30,8 @@ export function resolveImport(uri: string, ctx: ResolveContext): string[] {
 }
 
 function loadGithubGitignore(rest: string, ctx: ResolveContext): string[] {
-  const expected = /^github\/gitignore\/([A-Za-z0-9._-]+)$/.exec(rest);
+  // Nested paths allowed (e.g. Global/macOS) — github/gitignore has subdirs.
+  const expected = /^github\/gitignore\/([A-Za-z0-9._/-]+)$/.exec(rest);
   if (!expected) {
     throw new CompileError(`github:// imports must match 'github/gitignore/<NAME>' (got "${rest}")`);
   }

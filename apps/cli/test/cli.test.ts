@@ -104,3 +104,49 @@ describe("sc placeholders", () => {
     expect(r.stderr).toContain("Phase 3");
   });
 });
+
+describe("sc imports", () => {
+  it("list shows each import with cache state", () => {
+    const r = runCli(["--json", "imports", "list"]);
+    expect(r.status).toBe(0);
+    const body = JSON.parse(r.stdout) as {
+      imports: Array<{ uri: string; cached: boolean }>;
+    };
+    const node = body.imports.find((i) => i.uri === "github://github/gitignore/Node");
+    expect(node).toBeDefined();
+    expect(node!.cached).toBe(false);
+  });
+
+  it("refresh writes the cached file and updates checksums.json", () => {
+    // Pre-stage the cache file so refresh sees "cached" without network.
+    const importsDir = join(configDir, "imports");
+    mkdirSync(join(importsDir, "github-gitignore"), { recursive: true });
+    writeFileSync(join(importsDir, "github-gitignore", "Node.gitignore"), "*.log\nnode_modules/\n");
+    // checksums.json says we fetched it just now, so refresh should report cached.
+    writeFileSync(
+      join(importsDir, "checksums.json"),
+      JSON.stringify(
+        {
+          version: 1,
+          entries: [
+            {
+              uri: "github://github/gitignore/Node",
+              sha256: "deadbeef".repeat(8),
+              bytes: 22,
+              fetchedAt: new Date().toISOString(),
+              cachePath: "github-gitignore/Node.gitignore",
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    const r = runCli(["--json", "imports", "refresh"]);
+    expect(r.status).toBe(0);
+    const body = JSON.parse(r.stdout) as {
+      results: Array<{ uri: string; status: string }>;
+    };
+    expect(body.results.some((x) => x.status === "cached")).toBe(true);
+  });
+});

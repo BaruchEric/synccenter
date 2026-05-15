@@ -202,6 +202,12 @@ beforeAll(async () => {
     ].join("\n"),
   );
 
+  // Seed a ruleset with imports so the imports routes have something to scan.
+  writeFileSync(
+    join(configDir, "rules", "with-import.yaml"),
+    "name: with-import\nversion: 1\nimports:\n  - github://github/gitignore/Node\nexcludes:\n  - '**/dist/'\n",
+  );
+
   macFake = new FakeSyncthing();
   qnapFake = new FakeSyncthing();
   rcloneFake = new FakeRclone();
@@ -216,7 +222,20 @@ beforeAll(async () => {
     SC_DB_PATH: ":memory:",
   });
   const registry = new HostRegistry({ cfg, clients });
-  const { app } = buildApp({ cfg, registry, rclone: rcloneFake as unknown as RcloneClient });
+  const importerFetch = (async (input: Request | string | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("/Node.gitignore")) {
+      return new Response("*.log\nnode_modules/\n", { status: 200 });
+    }
+    return new Response("not found", { status: 404 });
+  }) as unknown as typeof fetch;
+
+  const { app } = buildApp({
+    cfg,
+    registry,
+    rclone: rcloneFake as unknown as RcloneClient,
+    importerFetch,
+  });
 
   server = await new Promise<Server>((resolve) => {
     const s = app.listen(0, () => resolve(s));
@@ -274,7 +293,7 @@ describe("config-repo reads", () => {
 
   it("GET /rules", async () => {
     const r = await call("/rules");
-    expect(await r.json()).toEqual({ rules: ["base-binaries", "divergent"] });
+    expect(await r.json()).toEqual({ rules: ["base-binaries", "divergent", "with-import"] });
   });
 
   it("GET /hosts", async () => {
@@ -506,5 +525,59 @@ describe("registry edge cases", () => {
   it("GET /hosts/:name/status 404s for an unknown host", async () => {
     const r = await call("/hosts/nope/status");
     expect(r.status).toBe(404);
+  });
+});
+
+describe("imports routes", () => {
+  it("GET /imports lists imports with cache state", async () => {
+    const r = await call("/imports");
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      imports: Array<{ uri: string; cached: boolean }>;
+      perRuleset: Record<string, string[]>;
+    };
+    const node = body.imports.find((i) => i.uri === "github://github/gitignore/Node");
+    expect(node).toBeDefined();
+    expect(node!.cached).toBe(false);
+    expect(body.perRuleset["with-import"]).toEqual(["github://github/gitignore/Node"]);
+  });
+
+  it("POST /imports/refresh fetches via injected fetch and updates checksums", async () => {
+    const r = await call("/imports/refresh", { method: "POST" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      results: Array<{ uri: string; status: string; sha256?: string }>;
+    };
+    const node = body.results.find((x) => x.uri === "github://github/gitignore/Node")!;
+    expect(node.status).toBe("fetched");
+    expect(node.sha256).toHaveLength(64);
+
+    // Subsequent list shows cached=true.
+    const listed = await call("/imports");
+    const second = (await listed.json()) as { imports: Array<{ uri: string; cached: boolean }> };
+    const after = second.imports.find((i) => i.uri === "github://github/gitignore/Node")!;
+    expect(after.cached).toBe(true);
+  });
+
+  it("POST /imports/refresh-one fails with 400 when no ?uri", async () => {
+    const r = await call("/imports/refresh-one", { method: "POST" });
+    expect(r.status).toBe(400);
+  });
+
+  it("POST /imports/refresh-one returns 502 on fetch failure", async () => {
+    const r = await call("/imports/refresh-one?uri=github://github/gitignore/DoesNotExist", { method: "POST" });
+    expect(r.status).toBe(502);
+    const body = (await r.json()) as { result: { status: string; error?: string } };
+    expect(body.result.status).toBe("error-fetch");
+  });
+
+  it("after refresh, dev-monorepo-like compile actually works", async () => {
+    // The fixture rule "with-import" imports Node; first refresh, then compile.
+    await call("/imports/refresh", { method: "POST" });
+    const r = await call("/rules/with-import/compile", { method: "POST" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { stignore: string };
+    expect(body.stignore).toContain("node_modules/");
+    expect(body.stignore).toContain("**/dist/");
   });
 });
