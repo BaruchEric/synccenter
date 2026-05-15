@@ -1,15 +1,14 @@
 import { Router } from "express";
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { compile, loadRuleset, CompileError } from "@synccenter/rule-compiler";
 import type { ApiConfig } from "../config.ts";
+import { listYamlNames } from "../lib/fs.ts";
 
 export function rulesRouter(cfg: ApiConfig): Router {
   const r = Router();
 
   r.get("/rules", (_req, res) => {
-    const names = listYamls(cfg.rulesDir);
-    res.json({ rules: names });
+    res.json({ rules: listYamlNames(cfg.rulesDir) });
   });
 
   r.get("/rules/:name", (req, res) => {
@@ -44,15 +43,4 @@ export function rulesRouter(cfg: ApiConfig): Router {
   });
 
   return r;
-}
-
-function listYamls(dir: string): string[] {
-  try {
-    return readdirSync(dir)
-      .filter((f) => f.endsWith(".yaml"))
-      .map((f) => f.slice(0, -".yaml".length))
-      .sort();
-  } catch {
-    return [];
-  }
 }

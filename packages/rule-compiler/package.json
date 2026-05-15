@@ -13,6 +13,7 @@
     "build": "echo 'rule-compiler: bundle in phase 3'"
   },
   "dependencies": {
+    "@synccenter/importers": "workspace:*",
     "yaml": "^2.5.0"
   }
 }

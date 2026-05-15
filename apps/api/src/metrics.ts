@@ -1,18 +1,11 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { Request, Response } from "express";
 import { SyncthingError } from "@synccenter/adapters";
 import type { ApiConfig } from "./config.ts";
 import type { Db } from "./db.ts";
+import { listFolderManifests } from "./lib/fs.ts";
 import type { HostRegistry } from "./registry.ts";
 
 const STARTED = Date.now();
-
-interface FolderManifest {
-  name: string;
-  paths: Record<string, string>;
-}
 
 export function metricsHandlerFactory(
   cfg: ApiConfig,
@@ -146,27 +139,6 @@ export function metricsHandlerFactory(
 
     res.set("Content-Type", "text/plain; version=0.0.4").send(`${lines.join("\n")}\n`);
   };
-}
-
-function listFolderManifests(dir: string): FolderManifest[] {
-  let files: string[];
-  try {
-    files = readdirSync(dir).filter((f) => f.endsWith(".yaml"));
-  } catch {
-    return [];
-  }
-  const out: FolderManifest[] = [];
-  for (const f of files) {
-    try {
-      const parsed = parseYaml(readFileSync(join(dir, f), "utf8")) as FolderManifest;
-      if (parsed?.name && parsed.paths && typeof parsed.paths === "object") {
-        out.push(parsed);
-      }
-    } catch {
-      // skip invalid
-    }
-  }
-  return out;
 }
 
 function escapeLabel(v: string): string {

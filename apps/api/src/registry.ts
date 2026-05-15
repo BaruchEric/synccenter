@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { SyncthingClient } from "@synccenter/adapters";
 import type { ApiConfig } from "./config.ts";
+import { listYamlNames } from "./lib/fs.ts";
 
 export interface HostManifest {
   name: string;
@@ -40,14 +41,7 @@ export class HostRegistry {
   }
 
   list(): string[] {
-    try {
-      return readdirSync(this.cfg.hostsDir)
-        .filter((f) => f.endsWith(".yaml"))
-        .map((f) => f.slice(0, -".yaml".length))
-        .sort();
-    } catch {
-      return [];
-    }
+    return listYamlNames(this.cfg.hostsDir);
   }
 
   manifest(name: string): HostManifest | undefined {

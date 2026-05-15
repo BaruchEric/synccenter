@@ -80,6 +80,7 @@
       "name": "@synccenter/rule-compiler",
       "version": "0.0.1",
       "dependencies": {
+        "@synccenter/importers": "workspace:*",
         "yaml": "^2.5.0",
       },
     },

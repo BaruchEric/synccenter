@@ -1,28 +1,13 @@
 import { Router, type Response } from "express";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { RcloneClient, RcloneError, SyncthingError } from "@synccenter/adapters";
 import { compile, CompileError } from "@synccenter/rule-compiler";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
+import { listYamlNames, parseFolderByName } from "../lib/fs.ts";
 import { HostRegistry, HostRegistryError } from "../registry.ts";
-
-interface FolderManifest {
-  name: string;
-  ruleset: string;
-  type: string;
-  paths: Record<string, string>;
-  cloud?: {
-    rclone_remote: string;
-    remote_path: string;
-    bisync?: {
-      schedule?: string;
-      flags?: string[];
-    };
-  };
-}
 
 export function foldersRouter(
   cfg: ApiConfig,
@@ -33,12 +18,11 @@ export function foldersRouter(
   const r = Router();
 
   r.get("/folders", (_req, res) => {
-    const names = listYamls(cfg.foldersDir);
-    res.json({ folders: names });
+    res.json({ folders: listYamlNames(cfg.foldersDir) });
   });
 
   r.get("/folders/:name", (req, res) => {
-    const m = loadFolder(cfg.foldersDir, req.params.name);
+    const m = parseFolderByName(cfg.foldersDir,req.params.name);
     if (!m) {
       res.status(404).json({ error: `folder not found: ${req.params.name}` });
       return;
@@ -47,7 +31,7 @@ export function foldersRouter(
   });
 
   r.get("/folders/:name/state", async (req, res) => {
-    const m = loadFolder(cfg.foldersDir, req.params.name);
+    const m = parseFolderByName(cfg.foldersDir,req.params.name);
     if (!m) {
       res.status(404).json({ error: `folder not found: ${req.params.name}` });
       return;
@@ -71,7 +55,7 @@ export function foldersRouter(
     name: string,
     op: "pause" | "resume",
   ): Promise<{ folder: string; perHost: Array<{ host: string; ok: boolean; error?: string }> }> => {
-    const m = loadFolder(foldersDir, name);
+    const m = parseFolderByName(foldersDir, name);
     if (!m) throw new HostRegistryError(`folder not found: ${name}`, "unknown-host");
     const hosts = Object.keys(m.paths);
     const results = await Promise.all(
@@ -109,7 +93,7 @@ export function foldersRouter(
 
   r.post("/folders/:name/apply", async (req, res) => {
     const dryRun = req.query.dryRun === "true";
-    const m = loadFolder(cfg.foldersDir, req.params.name);
+    const m = parseFolderByName(cfg.foldersDir,req.params.name);
     if (!m) {
       res.status(404).json({ error: `folder not found: ${req.params.name}` });
       return;
@@ -188,7 +172,7 @@ export function foldersRouter(
       res.status(503).json({ error: "rclone is not configured (set SC_RCLONE_URL)" });
       return;
     }
-    const m = loadFolder(cfg.foldersDir, req.params.name);
+    const m = parseFolderByName(cfg.foldersDir,req.params.name);
     if (!m) {
       res.status(404).json({ error: `folder not found: ${req.params.name}` });
       return;
@@ -260,32 +244,6 @@ export function foldersRouter(
   });
 
   return r;
-}
-
-function loadFolder(foldersDir: string, name: string): FolderManifest | undefined {
-  const path = join(foldersDir, `${name}.yaml`);
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return undefined;
-  }
-  try {
-    return parseYaml(raw) as FolderManifest;
-  } catch {
-    return undefined;
-  }
-}
-
-function listYamls(dir: string): string[] {
-  try {
-    return readdirSync(dir)
-      .filter((f) => f.endsWith(".yaml"))
-      .map((f) => f.slice(0, -".yaml".length))
-      .sort();
-  } catch {
-    return [];
-  }
 }
 
 function errorMessage(err: unknown): string {
