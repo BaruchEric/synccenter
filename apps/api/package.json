@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@synccenter/adapters": "workspace:*",
+    "@synccenter/apply-planner": "workspace:*",
     "@synccenter/importers": "workspace:*",
     "@synccenter/rule-compiler": "workspace:*",
+    "@synccenter/state-importer": "workspace:*",
     "express": "^4.21.0",
     "yaml": "^2.5.0"
   },

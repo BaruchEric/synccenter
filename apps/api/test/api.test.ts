@@ -380,57 +380,30 @@ describe("pause / resume", () => {
 });
 
 describe("apply", () => {
-  it("dry-run returns the compiled previews without touching daemons", async () => {
-    const r = await call("/folders/shared/apply?dryRun=true", { method: "POST" });
-    expect(r.status).toBe(200);
-    const body = (await r.json()) as { dryRun: boolean; stignorePreview: string; payloadHash: string };
-    expect(body.dryRun).toBe(true);
-    expect(body.stignorePreview).toContain(".DS_Store");
-    expect(body.payloadHash).toHaveLength(16);
-    expect(macFake.calls).toEqual([]);
-    expect(qnapFake.calls).toEqual([]);
-  });
+  // The new planner-based /folders/:name/apply spawns sops via createSecretsResolver
+  // to dereference device_id_ref + api_key_ref before building a SyncthingClient pool.
+  // Unit tests here don't have sops or encrypted secrets, so we exercise only the
+  // request-validation surface (CONFIRM_REQUIRED). Real end-to-end coverage lives
+  // behind SC_E2E in the live-environment harness.
 
-  it("apply calls setIgnores + scan on each host and records history", async () => {
+  it("apply requires confirm:true in body", async () => {
     const r = await call("/folders/shared/apply", { method: "POST" });
-    expect(r.status).toBe(200);
-    expect(macFake.calls.map((c) => c.method)).toEqual(["setIgnores", "scan"]);
-    expect(qnapFake.calls.map((c) => c.method)).toEqual(["setIgnores", "scan"]);
-    const ignoresCall = macFake.calls[0]!;
-    expect((ignoresCall.args[1] as string[])).toContain(".DS_Store");
-
-    // Verify apply_history got a row.
-    const hist = await call("/apply-history");
-    const body = (await hist.json()) as { history: Array<{ target_name: string; result: string }> };
-    expect(body.history[0]).toMatchObject({ target_name: "shared", result: "ok" });
-  });
-
-  it("apply returns 207 and logs error when a host fails", async () => {
-    qnapFake.failNext = new SyncthingError("set ignores rejected", 400, "/rest/db/ignores");
-    const r = await call("/folders/shared/apply", { method: "POST" });
-    expect(r.status).toBe(207);
-    const body = (await r.json()) as { perHost: Array<{ host: string; ok: boolean; error?: string }> };
-    const mac = body.perHost.find((p) => p.host === "mac-studio")!;
-    const qnap = body.perHost.find((p) => p.host === "qnap-ts453d")!;
-    expect(mac.ok).toBe(true);
-    expect(qnap.ok).toBe(false);
-    expect(qnap.error).toContain("set ignores rejected");
-  });
-
-  it("apply refuses on engine divergence without allowDivergent", async () => {
-    writeFileSync(
-      join(configDir, "folders", "diverge.yaml"),
-      [
-        "name: diverge",
-        "ruleset: divergent",
-        "type: send-receive",
-        "paths:",
-        "  mac-studio: /tmp/x",
-      ].join("\n"),
-    );
-    const r = await call("/folders/diverge/apply", { method: "POST" });
     expect(r.status).toBe(400);
-    expect((await r.json()) as { error: string }).toMatchObject({ error: expect.stringContaining("engine divergence") });
+    const body = (await r.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("CONFIRM_REQUIRED");
+  });
+
+  it("apply with confirm but no sops returns a structured error (not a crash)", async () => {
+    const r = await call("/folders/shared/apply", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: true, dryRun: true }),
+    });
+    // 4xx (manifest load / secrets resolution) or 5xx (sops missing) — never an unhandled crash.
+    expect([400, 500]).toContain(r.status);
+    const body = (await r.json()) as { error: { code: string; message: string } };
+    expect(body.error).toBeDefined();
+    expect(typeof body.error.message).toBe("string");
   });
 });
 
@@ -501,11 +474,8 @@ describe("folder bisync", () => {
   });
 
   it("triggers a bisync with the right path1/path2/filtersFile once compiled", async () => {
-    // First materialize compiled/<folder>/filter.rclone via apply.
-    const applyR = await call("/folders/shared/apply", { method: "POST" });
-    expect(applyR.status).toBe(200);
-    // (apply writes nothing to disk in this implementation — it pushes to Syncthing.
-    //  We need to write the compiled filter to disk manually for the bisync test.)
+    // Materialize compiled/<folder>/filter.rclone on disk — the bisync route
+    // expects the rule-compiler output to already exist there.
     mkdirSync(join(configDir, "compiled", "shared"), { recursive: true });
     writeFileSync(join(configDir, "compiled", "shared", "filter.rclone"), "- .DS_Store\n+ **\n");
 

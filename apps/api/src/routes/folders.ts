@@ -3,6 +3,18 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { RcloneClient, RcloneError, SyncthingError } from "@synccenter/adapters";
+import { RcloneClient as RcloneAdapterClient } from "@synccenter/adapters/rclone";
+import { SyncthingClient } from "@synccenter/adapters/syncthing";
+import {
+  plan as buildPlan,
+  apply as applyPlan,
+  computeDelta,
+  loadFolderManifest,
+  loadAllHosts,
+  createSecretsResolver,
+  type ApplyPlan,
+  type AdapterPool,
+} from "@synccenter/apply-planner";
 import { compile, CompileError } from "@synccenter/rule-compiler";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
@@ -91,80 +103,87 @@ export function foldersRouter(
     }
   });
 
-  r.post("/folders/:name/apply", async (req, res) => {
-    const dryRun = req.query.dryRun === "true";
-    const m = parseFolderByName(cfg.foldersDir,req.params.name);
-    if (!m) {
-      res.status(404).json({ error: `folder not found: ${req.params.name}` });
-      return;
-    }
-
-    let compiled;
+  r.post("/folders/:name/plan", async (req, res) => {
     try {
-      compiled = compile(join(cfg.rulesDir, `${m.ruleset}.yaml`), {
-        rulesetsDir: cfg.rulesDir,
-        importsDir: cfg.importsDir,
-        allowDivergent: req.query.allowDivergent === "true",
-      });
+      const p = doBuildPlan(cfg, req.params.name);
+      res.json({ plan: p });
     } catch (err) {
-      if (err instanceof CompileError) {
-        res.status(400).json({ error: err.message });
+      res.status(400).json({
+        error: {
+          code: (err as { code?: string }).code ?? "INTERNAL",
+          message: (err as Error).message,
+        },
+      });
+    }
+  });
+
+  r.post("/folders/:name/apply", async (req, res) => {
+    try {
+      if (req.body?.confirm !== true) {
+        res.status(400).json({
+          error: { code: "CONFIRM_REQUIRED", message: "POST body must include { confirm: true }" },
+        });
         return;
       }
-      throw err;
-    }
+      const { dryRun, prune, force } = req.body ?? {};
+      const p = doBuildPlan(cfg, req.params.name);
+      const pool = doBuildAdapterPool(cfg);
+      const live = await collectLiveState(p, pool);
+      const delta = computeDelta(p, live as never);
+      if (delta.liveOnly.length > 0 && !prune) {
+        res.status(409).json({
+          error: {
+            code: "LIVE_ONLY",
+            message: "pass prune:true to apply",
+            details: delta.liveOnly,
+          },
+        });
+        return;
+      }
+      if (delta.divergent.length > 0 && !force) {
+        res.status(409).json({
+          error: {
+            code: "DIVERGENT",
+            message: "pass force:true to apply",
+            details: delta.divergent,
+          },
+        });
+        return;
+      }
+      const result = await applyPlan(p, pool, { dryRun, prune, force });
 
-    const ignoreLines = compiled.stignore.split("\n").filter((l) => l.length > 0);
-    const payloadHash = createHash("sha256").update(compiled.stignore).digest("hex").slice(0, 16);
+      // Record history for auditability.
+      const overallOk = result.hosts.every((h) => h.status !== "failed");
+      const planJson = JSON.stringify({ folder: p.folder, perHost: p.perHost });
+      const payloadHash = createHash("sha256").update(planJson).digest("hex").slice(0, 16);
+      db.run(
+        `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
+         VALUES (?, ?, 'api', 'folder', ?, ?, ?, ?)`,
+        [
+          new Date().toISOString(),
+          "api-bearer",
+          p.folder,
+          payloadHash,
+          overallOk ? "ok" : "error",
+          overallOk
+            ? null
+            : `failures: ${result.hosts.filter((h) => h.status === "failed").length}/${result.hosts.length}`,
+        ],
+      );
 
-    if (dryRun) {
-      res.json({
-        folder: m.name,
-        dryRun: true,
-        hosts: Object.keys(m.paths),
-        stignorePreview: compiled.stignore,
-        rclonePreview: compiled.rcloneFilter,
-        warnings: compiled.warnings,
-        payloadHash,
+      res.json({ result, delta });
+    } catch (err) {
+      if (err instanceof CompileError) {
+        res.status(400).json({ error: { code: "COMPILE_ERROR", message: err.message } });
+        return;
+      }
+      res.status(500).json({
+        error: {
+          code: (err as { code?: string }).code ?? "INTERNAL",
+          message: (err as Error).message,
+        },
       });
-      return;
     }
-
-    const hosts = Object.keys(m.paths);
-    const perHost = await Promise.all(
-      hosts.map(async (host) => {
-        try {
-          const c = registry.client(host);
-          await c.setIgnores(m.name, ignoreLines);
-          await c.scan(m.name);
-          return { host, ok: true as const };
-        } catch (err) {
-          return { host, ok: false as const, error: errorMessage(err) };
-        }
-      }),
-    );
-
-    const overallOk = perHost.every((p) => p.ok);
-    db.run(
-      `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
-       VALUES (?, ?, 'api', 'folder', ?, ?, ?, ?)`,
-      [
-        new Date().toISOString(),
-        "api-bearer",
-        m.name,
-        payloadHash,
-        overallOk ? "ok" : "error",
-        overallOk ? null : `failures: ${perHost.filter((p) => !p.ok).length}/${perHost.length}`,
-      ],
-    );
-
-    res.status(overallOk ? 200 : 207).json({
-      folder: m.name,
-      dryRun: false,
-      payloadHash,
-      perHost,
-      warnings: compiled.warnings,
-    });
   });
 
   r.post("/folders/:name/bisync", async (req, res) => {
@@ -260,4 +279,77 @@ function respondFolderError(res: Response, err: unknown, name: string): void {
     return;
   }
   res.status(500).json({ error: errorMessage(err) });
+}
+
+function doBuildPlan(cfg: ApiConfig, name: string): ApplyPlan {
+  const folder = loadFolderManifest(join(cfg.foldersDir, `${name}.yaml`));
+  const hosts = loadAllHosts(cfg.hostsDir);
+  const secrets = createSecretsResolver({ configDir: cfg.configDir });
+  const compiled = compile(join(cfg.rulesDir, `${folder.ruleset}.yaml`), {
+    rulesetsDir: cfg.rulesDir,
+    importsDir: cfg.importsDir,
+  });
+  const ignoreLines = compiled.stignore.split("\n").filter((l) => l && !l.startsWith("#"));
+  const filtersFile = join(cfg.compiledDir, folder.ruleset, "filter.rclone");
+  return buildPlan({ folder, hosts, compiledIgnoreLines: ignoreLines, filtersFile, secrets });
+}
+
+function doBuildAdapterPool(cfg: ApiConfig): AdapterPool {
+  const hosts = loadAllHosts(cfg.hostsDir);
+  const secrets = createSecretsResolver({ configDir: cfg.configDir });
+  return {
+    syncthing: (h: string) => {
+      const host = hosts[h];
+      if (!host) throw new Error(`unknown host: ${h}`);
+      return new SyncthingClient({
+        baseUrl: host.syncthing.api_url,
+        apiKey: secrets.resolve(host.syncthing.api_key_ref),
+      });
+    },
+    rclone: (h: string) => {
+      const host = hosts[h];
+      if (!host) throw new Error(`unknown host: ${h}`);
+      if (!host.rclone) throw new Error(`host ${h} has no rclone block`);
+      const auth = secrets.resolve(host.rclone.auth_ref);
+      const ci = auth.indexOf(":");
+      if (ci > 0) {
+        return new RcloneAdapterClient({
+          baseUrl: host.rclone.rcd_url,
+          username: auth.slice(0, ci),
+          password: auth.slice(ci + 1),
+        });
+      }
+      return new RcloneAdapterClient({ baseUrl: host.rclone.rcd_url, bearerToken: auth });
+    },
+  };
+}
+
+async function collectLiveState(
+  p: ApplyPlan,
+  pool: AdapterPool,
+): Promise<Record<string, { folder: unknown; ignores: unknown }>> {
+  const out: Record<string, { folder: unknown; ignores: unknown }> = {};
+  for (const host of Object.keys(p.perHost)) {
+    const c = pool.syncthing(host);
+    let folder: unknown = null;
+    let ignores: unknown = null;
+    try {
+      folder = await c.getFolder(p.folder);
+    } catch {
+      // 404 — folder doesn't exist on this host yet.
+    }
+    if (folder) {
+      try {
+        const ig = await c.getIgnores(p.folder);
+        ignores = ig.ignore ?? [];
+      } catch {
+        ignores = [];
+      }
+      // Bridge: planner type requires label; adapter type doesn't.
+      const f = folder as { id: string; label?: string };
+      if (f.label === undefined) f.label = f.id;
+    }
+    out[host] = { folder, ignores };
+  }
+  return out;
 }
