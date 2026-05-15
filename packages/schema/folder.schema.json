@@ -40,6 +40,11 @@
           "description": "rclone remote name as configured in rclone.conf on the QNAP."
         },
         "remote_path": { "type": "string" },
+        "anchor": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Optional host name override for the bisync anchor. Default: the unique host with role: cloud-edge."
+        },
         "bisync": {
           "type": "object",
           "additionalProperties": false,
@@ -76,6 +81,34 @@
       "description": "True for cross-platform folders (Mac/Win/Linux UID and mode bits differ)."
     },
     "fs_watcher_enabled": { "type": "boolean" },
-    "fs_watcher_delay_s": { "type": "integer", "minimum": 1, "maximum": 3600 }
+    "fs_watcher_delay_s": { "type": "integer", "minimum": 1, "maximum": 3600 },
+    "conflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Folder-wide conflict resolution policy. Compiler maps policy to engine-specific flags.",
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": ["newer", "older", "keep-both", "require-resolve"]
+        },
+        "surface_to_ui": { "type": "boolean", "default": true }
+      }
+    },
+    "overrides": {
+      "type": "object",
+      "description": "Per-host scalar overrides for fields that may legitimately differ per host (type, ignore_perms, fs_watcher_*, versioning).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": { "type": "string", "enum": ["send-receive", "send-only", "receive-only", "receive-encrypted"] },
+          "ignore_perms": { "type": "boolean" },
+          "fs_watcher_enabled": { "type": "boolean" },
+          "fs_watcher_delay_s": { "type": "integer", "minimum": 1, "maximum": 3600 },
+          "versioning": { "$ref": "#/properties/versioning" }
+        }
+      },
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" }
+    }
   }
 }
