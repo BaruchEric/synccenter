@@ -1,5 +1,7 @@
 export { plan } from "./plan.ts";
 export { apply } from "./apply.ts";
+export { verify } from "./verify.ts";
+export { computeDelta } from "./delta.ts";
 export { renderCrontab } from "./render-crontab.ts";
 export { mapPolicy } from "./conflict.ts";
 export { buildSchedulePlan } from "./schedule.ts";
