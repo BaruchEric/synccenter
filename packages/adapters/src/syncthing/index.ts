@@ -1,6 +1,7 @@
 export { SyncthingClient, type SyncthingClientOpts } from "./client.ts";
 export { SyncthingError } from "./errors.ts";
 export type {
+  NewSyncthingDevice,
   NewSyncthingFolder,
   SyncthingDeviceConfig,
   SyncthingEvent,

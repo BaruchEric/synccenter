@@ -88,3 +88,11 @@ export interface NewSyncthingFolder {
   fsWatcherDelayS?: number;
   ignorePerms?: boolean;
 }
+
+/** Subset of fields needed to add a device. */
+export interface NewSyncthingDevice {
+  deviceID: string;
+  name: string;
+  addresses?: string[];
+  paused?: boolean;
+}

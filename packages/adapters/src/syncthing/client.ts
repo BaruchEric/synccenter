@@ -1,5 +1,6 @@
 import { SyncthingError } from "./errors.ts";
 import type {
+  NewSyncthingDevice,
   NewSyncthingFolder,
   SyncthingDeviceConfig,
   SyncthingEvent,
@@ -94,6 +95,27 @@ export class SyncthingClient {
   /** POST /rest/config/folders — add a new folder. */
   async addFolder(folder: NewSyncthingFolder): Promise<void> {
     await this.send("POST", "/rest/config/folders", folder);
+  }
+
+  /** DELETE /rest/config/folders/{id} */
+  async removeFolder(id: string): Promise<void> {
+    await this.send("DELETE", `/rest/config/folders/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * POST /rest/config/devices — add a new known device. Idempotent in Syncthing
+   * (adding the same device twice is a no-op).
+   */
+  async addDevice(device: NewSyncthingDevice): Promise<void> {
+    await this.send("POST", "/rest/config/devices", device);
+  }
+
+  /**
+   * PATCH /rest/config/folders/{id} — partial update. Caller provides only the
+   * fields to change.
+   */
+  async patchFolder(id: string, patch: Partial<SyncthingFolderConfig>): Promise<void> {
+    await this.send("PATCH", `/rest/config/folders/${encodeURIComponent(id)}`, patch);
   }
 
   /** PATCH /rest/config/folders/{id} with { paused: true } */

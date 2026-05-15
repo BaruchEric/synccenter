@@ -173,6 +173,39 @@ describe("write endpoints", () => {
     expect(sent.id).toBe("new");
     expect(sent.devices[0].deviceID).toBe("ABC");
   });
+
+  it("addDevice POSTs the device payload", async () => {
+    const { client: c, calls } = client({ status: 200, body: "" });
+    await c.addDevice({
+      deviceID: "DEV-123",
+      name: "qnap",
+      addresses: ["dynamic"],
+    });
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.url).toBe("http://st.local:8384/rest/config/devices");
+    expect(calls[0]!.headers["content-type"]).toBe("application/json");
+    const sent = JSON.parse(calls[0]!.body!);
+    expect(sent.deviceID).toBe("DEV-123");
+    expect(sent.name).toBe("qnap");
+    expect(sent.addresses).toEqual(["dynamic"]);
+  });
+
+  it("patchFolder PATCHes the partial folder body", async () => {
+    const { client: c, calls } = client({ status: 200, body: "" });
+    await c.patchFolder("code", { label: "Code v2", fsWatcherEnabled: true });
+    expect(calls[0]!.method).toBe("PATCH");
+    expect(calls[0]!.url).toBe("http://st.local:8384/rest/config/folders/code");
+    expect(calls[0]!.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(calls[0]!.body!)).toEqual({ label: "Code v2", fsWatcherEnabled: true });
+  });
+
+  it("removeFolder DELETEs the folder by id", async () => {
+    const { client: c, calls } = client({ status: 200, body: "" });
+    await c.removeFolder("my folder/x");
+    expect(calls[0]!.method).toBe("DELETE");
+    expect(calls[0]!.url).toBe("http://st.local:8384/rest/config/folders/my%20folder%2Fx");
+    expect(calls[0]!.body).toBeUndefined();
+  });
 });
 
 describe("error handling", () => {
