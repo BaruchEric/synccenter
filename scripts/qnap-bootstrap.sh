@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 # qnap-bootstrap.sh — one-shot Syncthing + rclone bring-up on a QNAP.
 #
-# Run AS ROOT on the QNAP (admin user has sudo on QTS). Idempotent — safe to
-# re-run; existing containers are left alone if their config matches.
+# Run as `admin` on the QNAP (admin already has sudo equivalents on QTS).
+# Idempotent — safe to re-run; existing containers are recreated only if the
+# compose file changes.
 #
 # What it does:
 #   1. Creates /share/Container/synccenter/{syncthing,state,rclone-config} and /share/Sync
 #   2. Writes a minimal docker-compose.yml for syncthing + rclone-rcd
 #   3. docker compose up -d
-#   4. Persists fs.inotify.max_user_watches=524288 via /etc/init.d/autorun.sh
+#   4. Persists fs.inotify.max_user_watches=524288 via /etc/config/autorun.sh
+#      (QTS persists /etc/config across firmware updates — it's on the DOM partition)
 #   5. Prints the Syncthing device ID + API key so the operator can copy them
 
 set -euo pipefail
+
+# Container Station ships docker on a non-default path.
+export PATH="/share/CACHEDEV1_DATA/.qpkg/container-station/usr/bin:${PATH}"
 
 CONTAINER_ROOT="/share/Container/synccenter"
 COMPOSE_FILE="${CONTAINER_ROOT}/docker-compose.yml"
@@ -19,17 +24,17 @@ SYNCTHING_CONFIG_DIR="${CONTAINER_ROOT}/syncthing"
 STATE_DIR="${CONTAINER_ROOT}/state"
 RCLONE_CONFIG_DIR="${CONTAINER_ROOT}/rclone-config"
 SYNC_ROOT="/share/Sync"
+AUTORUN="/etc/config/autorun.sh"
 
 # Defaults — override via env.
 RCLONE_USER="${SC_RCLONE_USER:-synccenter}"
 RCLONE_PASS="${SC_RCLONE_PASS:-$(head -c 24 /dev/urandom | base64 | tr -d '/+=' )}"
 
-if [[ $EUID -ne 0 ]]; then
-  echo "must run as root (sudo bash $0)" >&2
+command -v docker >/dev/null || {
+  echo "docker not on PATH even after adding Container Station's bin dir." >&2
+  echo "Is Container Station installed? Try: qpkg_service start container-station" >&2
   exit 1
-fi
-
-command -v docker >/dev/null || { echo "docker not installed — install Container Station QPKG"; exit 1; }
+}
 docker compose version >/dev/null 2>&1 || { echo "docker compose plugin missing"; exit 1; }
 
 echo "==> creating dirs"
@@ -57,9 +62,9 @@ services:
       - "22000:22000/tcp"
       - "22000:22000/udp"
       - "21027:21027/udp"
-    sysctls:
-      net.core.rmem_max: "7500000"
-      net.core.wmem_max: "7500000"
+    # net.core.{rmem,wmem}_max sysctls (LSIO's perf recommendation) are
+    # rejected by QTS's container namespacing — host-level sysctl set in
+    # /etc/config/autorun.sh instead.
 
   rclone-rcd:
     image: rclone/rclone:latest
@@ -84,18 +89,23 @@ docker compose -f "${COMPOSE_FILE}" up -d
 echo "==> raising inotify watch limit"
 sysctl -w fs.inotify.max_user_watches=524288 >/dev/null
 
-# Persist across reboots. QTS replays /etc/config/qpkg.conf scripts and
-# /etc/init.d/autorun.sh; we append to autorun.sh because it survives firmware
-# updates if the operator follows the standard QNAP pattern of storing it on
-# /share. We refuse to double-append.
-AUTORUN="/etc/init.d/autorun.sh"
+# Persist across reboots. /etc/config/ lives on the DOM partition and
+# survives firmware updates. The operator must also enable autorun in
+# QTS → Control Panel → Hardware → General → "Run user defined processes
+# during startup of network services" — without that toggle the file is
+# present but never invoked.
 LINE="sysctl -w fs.inotify.max_user_watches=524288"
 if [[ -f "${AUTORUN}" ]] && grep -qF "${LINE}" "${AUTORUN}"; then
   echo "    (inotify line already in ${AUTORUN})"
 else
+  if [[ ! -f "${AUTORUN}" ]]; then
+    printf '#!/bin/sh\n# QNAP user autorun — invoked at boot when enabled in QTS Control Panel.\n' > "${AUTORUN}"
+  fi
   echo "${LINE}" >> "${AUTORUN}"
   chmod +x "${AUTORUN}"
   echo "    appended to ${AUTORUN}"
+  echo "    NOTE: enable autorun in QTS Control Panel → Hardware → General"
+  echo "          → 'Run user defined processes during startup of network services'"
 fi
 
 echo
