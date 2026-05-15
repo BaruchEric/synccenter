@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../synccenter/packages/schema/host.schema.json
+name: win-desktop
+hostname: ericbaruchc453
+os: windows
+role: mesh-node
+
+ssh:
+  user: ericbaruch
+  port: 22
+  # Parallels shared-network address from the Mac. Tailscale address
+  # (100.116.134.9) also reachable but firewalled inbound on the VM.
+  host: 10.211.55.9
+
+syncthing:
+  # Installed as a Windows service via NSSM. Binary lives in the user's
+  # Local AppData; config + db at C:\ProgramData\Syncthing so the LOCAL
+  # SYSTEM service account owns it.
+  install_method: winget+nssm
+  binary_path: C:\Users\ericbaruch\AppData\Local\Programs\Syncthing\syncthing.exe
+  home_dir: C:\ProgramData\Syncthing
+  api_url: http://127.0.0.1:8384
+  api_key_ref: secrets/syncthing-api-keys.enc.yaml#win-desktop
+  device_id_ref: secrets/syncthing-device-ids.enc.yaml#win-desktop

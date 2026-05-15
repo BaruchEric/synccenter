@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../synccenter/packages/schema/folder.schema.json
+#
+# Example folder definition. Rename and edit before applying; the apply step
+# will fail until `hosts/<name>.yaml` exists for every key under `paths:`.
+name: example-code-projects
+ruleset: dev-monorepo
+type: send-receive
+
+paths:
+  mac-studio:  /Users/eric/Code
+  qnap-ts453d: /share/Sync/code
+  win-desktop: 'C:\Users\eric\Code'
+
+cloud:
+  rclone_remote: gdrive
+  remote_path: sync/code
+  bisync:
+    schedule: "*/15 * * * *"
+    flags:
+      - --resilient
+      - --recover
+      - --max-lock=2m
+      - --conflict-resolve=newer
+      - --compare=size,modtime,checksum
+
+versioning:
+  type: staggered
+  params:
+    maxAge: 30d
+
+ignore_perms: true
+fs_watcher_enabled: true
+fs_watcher_delay_s: 10

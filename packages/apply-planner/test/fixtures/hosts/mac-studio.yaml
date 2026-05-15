@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../synccenter/packages/schema/host.schema.json
+name: mac-studio
+hostname: mac-studio.local
+os: macos
+role: mesh-node
+
+ssh:
+  user: ericbaruch
+  port: 22
+
+syncthing:
+  install_method: brew
+  api_url: http://127.0.0.1:8384
+  api_key_ref: secrets/syncthing-api-keys.enc.yaml#mac-studio
+  device_id_ref: secrets/syncthing-device-ids.enc.yaml#mac-studio

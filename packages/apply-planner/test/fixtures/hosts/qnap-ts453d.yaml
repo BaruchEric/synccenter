@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../synccenter/packages/schema/host.schema.json
+name: qnap-ts453d
+hostname: qnap-ts453d.local
+ip: 192.168.1.10
+os: qnap
+role: cloud-edge
+
+ssh:
+  user: admin
+  port: 22
+
+syncthing:
+  install_method: docker
+  # NOTE: SyncCenter API calls hit this URL from inside its own container —
+  # on the QNAP that becomes http://syncthing:8384 over the Docker network.
+  # 192.168.1.10:8384 is the LAN-reachable port for operator browser access.
+  api_url: http://192.168.1.10:8384
+  api_key_ref: secrets/syncthing-api-keys.enc.yaml#qnap-ts453d
+  device_id_ref: secrets/syncthing-device-ids.enc.yaml#qnap-ts453d
+
+rclone:
+  rcd_url: http://127.0.0.1:5572
+  auth_ref: secrets/rclone-rcd-auth.enc.yaml#qnap-ts453d

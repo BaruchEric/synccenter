@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../synccenter/packages/schema/folder.schema.json
+#
+# Phase 1 exit-criteria folder. Tiny, low-stakes — just used to prove
+# Mac → QNAP propagation works end-to-end before any real data syncs.
+name: test
+ruleset: base-binaries
+type: send-receive
+
+paths:
+  mac-studio:  /Users/ericbaruch/Sync/test
+  qnap-ts453d: /share/Sync/test
+  win-desktop: C:\Sync\test
+
+ignore_perms: true
+fs_watcher_enabled: true
+fs_watcher_delay_s: 5
