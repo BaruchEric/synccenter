@@ -32,6 +32,10 @@
         "yaml": "^2.5.0",
       },
     },
+    "packages/adapters": {
+      "name": "@synccenter/adapters",
+      "version": "0.0.1",
+    },
     "packages/rule-compiler": {
       "name": "@synccenter/rule-compiler",
       "version": "0.0.1",
@@ -41,6 +45,8 @@
     },
   },
   "packages": {
+    "@synccenter/adapters": ["@synccenter/adapters@workspace:packages/adapters"],
+
     "@synccenter/api": ["@synccenter/api@workspace:apps/api"],
 
     "@synccenter/cli": ["@synccenter/cli@workspace:apps/cli"],

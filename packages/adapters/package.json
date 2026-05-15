@@ -1,0 +1,16 @@
+{
+  "name": "@synccenter/adapters",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./syncthing": "./src/syncthing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "echo 'adapters: bundle in phase 3'"
+  }
+}
