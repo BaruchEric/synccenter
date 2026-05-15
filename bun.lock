@@ -31,8 +31,11 @@
         "sc": "./src/index.ts",
       },
       "dependencies": {
+        "@synccenter/adapters": "workspace:*",
+        "@synccenter/apply-planner": "workspace:*",
         "@synccenter/importers": "workspace:*",
         "@synccenter/rule-compiler": "workspace:*",
+        "@synccenter/state-importer": "workspace:*",
         "commander": "^12.1.0",
         "yaml": "^2.5.0",
       },
