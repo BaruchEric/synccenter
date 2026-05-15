@@ -10,6 +10,8 @@ import { rulesRouter } from "./routes/rules.ts";
 import { hostsRouter } from "./routes/hosts.ts";
 import { importsRouter } from "./routes/imports.ts";
 import { rcloneRouter } from "./routes/rclone.ts";
+import { scheduleRouter } from "./routes/schedule.ts";
+import { stateRouter } from "./routes/state.ts";
 import { systemRouter } from "./routes/system.ts";
 import { HostRegistry } from "./registry.ts";
 
@@ -61,6 +63,8 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
   app.use("/", hostsRouter(cfg, reg));
   app.use("/", rcloneRouter(rcloneClient));
   app.use("/", importsRouter({ cfg, ...(importerFetch ? { importerFetch } : {}) }));
+  app.use("/", stateRouter(cfg));
+  app.use("/", scheduleRouter(cfg));
   app.use("/", systemRouter(database));
 
   app.use((_req, res) => res.status(404).json({ error: "not found" }));
