@@ -86,6 +86,14 @@
         "yaml": "^2.5.0",
       },
     },
+    "packages/state-importer": {
+      "name": "@synccenter/state-importer",
+      "version": "0.0.1",
+      "dependencies": {
+        "@synccenter/adapters": "workspace:*",
+        "yaml": "^2.5.0",
+      },
+    },
   },
   "packages": {
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
@@ -259,6 +267,8 @@
     "@synccenter/mcp": ["@synccenter/mcp@workspace:apps/mcp"],
 
     "@synccenter/rule-compiler": ["@synccenter/rule-compiler@workspace:packages/rule-compiler"],
+
+    "@synccenter/state-importer": ["@synccenter/state-importer@workspace:packages/state-importer"],
 
     "@synccenter/web": ["@synccenter/web@workspace:apps/web"],
 
