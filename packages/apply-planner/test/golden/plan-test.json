@@ -1,0 +1,151 @@
+{
+  "folder": "test",
+  "perHost": {
+    "mac-studio": [
+      {
+        "kind": "addDevice",
+        "host": "mac-studio",
+        "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV",
+        "name": "qnap-ts453d"
+      },
+      {
+        "kind": "addDevice",
+        "host": "mac-studio",
+        "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV",
+        "name": "win-desktop"
+      },
+      {
+        "kind": "addFolder",
+        "host": "mac-studio",
+        "folder": {
+          "id": "test",
+          "label": "test",
+          "path": "/Users/ericbaruch/Sync/test",
+          "type": "sendreceive",
+          "devices": [
+            {
+              "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV"
+            },
+            {
+              "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV"
+            },
+            {
+              "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV"
+            }
+          ],
+          "ignorePerms": true,
+          "fsWatcherEnabled": true,
+          "fsWatcherDelayS": 5
+        }
+      },
+      {
+        "kind": "setIgnores",
+        "host": "mac-studio",
+        "folderId": "test",
+        "lines": [
+          ".DS_Store",
+          "Thumbs.db",
+          "*.tmp"
+        ]
+      }
+    ],
+    "qnap-ts453d": [
+      {
+        "kind": "addDevice",
+        "host": "qnap-ts453d",
+        "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV",
+        "name": "mac-studio"
+      },
+      {
+        "kind": "addDevice",
+        "host": "qnap-ts453d",
+        "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV",
+        "name": "win-desktop"
+      },
+      {
+        "kind": "addFolder",
+        "host": "qnap-ts453d",
+        "folder": {
+          "id": "test",
+          "label": "test",
+          "path": "/share/Sync/test",
+          "type": "sendreceive",
+          "devices": [
+            {
+              "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV"
+            },
+            {
+              "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV"
+            },
+            {
+              "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV"
+            }
+          ],
+          "ignorePerms": true,
+          "fsWatcherEnabled": true,
+          "fsWatcherDelayS": 5
+        }
+      },
+      {
+        "kind": "setIgnores",
+        "host": "qnap-ts453d",
+        "folderId": "test",
+        "lines": [
+          ".DS_Store",
+          "Thumbs.db",
+          "*.tmp"
+        ]
+      }
+    ],
+    "win-desktop": [
+      {
+        "kind": "addDevice",
+        "host": "win-desktop",
+        "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV",
+        "name": "mac-studio"
+      },
+      {
+        "kind": "addDevice",
+        "host": "win-desktop",
+        "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV",
+        "name": "qnap-ts453d"
+      },
+      {
+        "kind": "addFolder",
+        "host": "win-desktop",
+        "folder": {
+          "id": "test",
+          "label": "test",
+          "path": "C:\\Sync\\test",
+          "type": "sendreceive",
+          "devices": [
+            {
+              "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV"
+            },
+            {
+              "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV"
+            },
+            {
+              "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV"
+            }
+          ],
+          "ignorePerms": true,
+          "fsWatcherEnabled": true,
+          "fsWatcherDelayS": 5
+        }
+      },
+      {
+        "kind": "setIgnores",
+        "host": "win-desktop",
+        "folderId": "test",
+        "lines": [
+          ".DS_Store",
+          "Thumbs.db",
+          "*.tmp"
+        ]
+      }
+    ]
+  },
+  "schedule": [],
+  "warnings": []
+}

@@ -1,0 +1,156 @@
+{
+  "folder": "example-code-projects",
+  "perHost": {
+    "mac-studio": [
+      {
+        "kind": "addDevice",
+        "host": "mac-studio",
+        "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV",
+        "name": "qnap-ts453d"
+      },
+      {
+        "kind": "addDevice",
+        "host": "mac-studio",
+        "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV",
+        "name": "win-desktop"
+      },
+      {
+        "kind": "addFolder",
+        "host": "mac-studio",
+        "folder": {
+          "id": "example-code-projects",
+          "label": "example-code-projects",
+          "path": "/Users/eric/Code",
+          "type": "sendreceive",
+          "devices": [
+            {
+              "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV"
+            },
+            {
+              "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV"
+            },
+            {
+              "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV"
+            }
+          ],
+          "ignorePerms": true,
+          "fsWatcherEnabled": true,
+          "fsWatcherDelayS": 10
+        }
+      },
+      {
+        "kind": "setIgnores",
+        "host": "mac-studio",
+        "folderId": "example-code-projects",
+        "lines": [
+          "**/node_modules/",
+          "**/.env"
+        ]
+      }
+    ],
+    "qnap-ts453d": [
+      {
+        "kind": "addDevice",
+        "host": "qnap-ts453d",
+        "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV",
+        "name": "mac-studio"
+      },
+      {
+        "kind": "addDevice",
+        "host": "qnap-ts453d",
+        "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV",
+        "name": "win-desktop"
+      },
+      {
+        "kind": "addFolder",
+        "host": "qnap-ts453d",
+        "folder": {
+          "id": "example-code-projects",
+          "label": "example-code-projects",
+          "path": "/share/Sync/code",
+          "type": "sendreceive",
+          "devices": [
+            {
+              "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV"
+            },
+            {
+              "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV"
+            },
+            {
+              "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV"
+            }
+          ],
+          "ignorePerms": true,
+          "fsWatcherEnabled": true,
+          "fsWatcherDelayS": 10
+        }
+      },
+      {
+        "kind": "setIgnores",
+        "host": "qnap-ts453d",
+        "folderId": "example-code-projects",
+        "lines": [
+          "**/node_modules/",
+          "**/.env"
+        ]
+      }
+    ],
+    "win-desktop": [
+      {
+        "kind": "addDevice",
+        "host": "win-desktop",
+        "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV",
+        "name": "mac-studio"
+      },
+      {
+        "kind": "addDevice",
+        "host": "win-desktop",
+        "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV",
+        "name": "qnap-ts453d"
+      },
+      {
+        "kind": "addFolder",
+        "host": "win-desktop",
+        "folder": {
+          "id": "example-code-projects",
+          "label": "example-code-projects",
+          "path": "C:\\Users\\eric\\Code",
+          "type": "sendreceive",
+          "devices": [
+            {
+              "deviceID": "MACDEV-MACDEV-MACDEV-MACDEV-MACDEV"
+            },
+            {
+              "deviceID": "QNAPDV-QNAPDV-QNAPDV-QNAPDV-QNAPDV"
+            },
+            {
+              "deviceID": "WINDEV-WINDEV-WINDEV-WINDEV-WINDEV"
+            }
+          ],
+          "ignorePerms": true,
+          "fsWatcherEnabled": true,
+          "fsWatcherDelayS": 10
+        }
+      },
+      {
+        "kind": "setIgnores",
+        "host": "win-desktop",
+        "folderId": "example-code-projects",
+        "lines": [
+          "**/node_modules/",
+          "**/.env"
+        ]
+      }
+    ]
+  },
+  "schedule": [
+    {
+      "anchor": "qnap-ts453d",
+      "folder": "example-code-projects",
+      "cron": "*/15 * * * *",
+      "command": "docker exec rclone-rcd rclone bisync /share/Sync/code gdrive:sync/code --filters-file=/share/synccenter-config/compiled/dev-monorepo/filter.rclone --resilient --recover --max-lock=2m --conflict-resolve=newer --compare=size,modtime,checksum",
+      "filtersFile": "/share/synccenter-config/compiled/dev-monorepo/filter.rclone"
+    }
+  ],
+  "warnings": []
+}
