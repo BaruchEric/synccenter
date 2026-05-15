@@ -1,0 +1,13 @@
+# Drop into the existing Prometheus stack's scrape_configs.
+scrape_configs:
+  - job_name: synccenter
+    metrics_path: /metrics
+    scheme: https
+    static_configs:
+      - targets:
+          - sync.beric.ca
+        labels:
+          service: synccenter
+    # /metrics queries every Syncthing per scrape; give it room.
+    scrape_interval: 30s
+    scrape_timeout: 15s

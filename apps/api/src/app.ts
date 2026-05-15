@@ -3,7 +3,7 @@ import { RcloneClient } from "@synccenter/adapters";
 import { bearerAuth } from "./auth.ts";
 import type { ApiConfig } from "./config.ts";
 import { openDb, type Db } from "./db.ts";
-import { metricsHandler } from "./metrics.ts";
+import { metricsHandlerFactory } from "./metrics.ts";
 import { foldersRouter } from "./routes/folders.ts";
 import { rulesRouter } from "./routes/rules.ts";
 import { hostsRouter } from "./routes/hosts.ts";
@@ -51,7 +51,7 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
   app.get("/health", (_req, res) => {
     res.json({ ok: true, version: "0.0.1" });
   });
-  app.get("/metrics", metricsHandler);
+  app.get("/metrics", metricsHandlerFactory(cfg, reg, database));
 
   app.use(bearerAuth(cfg.apiToken));
 

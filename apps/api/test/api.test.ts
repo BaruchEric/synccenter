@@ -278,6 +278,17 @@ describe("public + auth", () => {
     const r = await call("/folders", {}, false);
     expect(r.status).toBe(401);
   });
+
+  it("GET /metrics is public and includes live host + folder gauges", async () => {
+    const r = await call("/metrics", {}, false);
+    expect(r.status).toBe(200);
+    const body = await r.text();
+    expect(body).toContain("synccenter_up 1");
+    expect(body).toContain('synccenter_host_online{host="mac-studio"} 1');
+    expect(body).toContain('synccenter_host_online{host="qnap-ts453d"} 1');
+    expect(body).toMatch(/synccenter_folder_state_info\{folder="shared",host="mac-studio",state="idle"\} 1/);
+    expect(body).toContain("synccenter_conflicts_open 0");
+  });
 });
 
 describe("config-repo reads", () => {

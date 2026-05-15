@@ -1,0 +1,61 @@
+groups:
+  - name: synccenter
+    interval: 1m
+    rules:
+      - alert: SyncCenterAPIDown
+        expr: up{job="synccenter"} == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "SyncCenter API is unreachable"
+          runbook: "docs/runbooks/synccenter-api-down.md"
+
+      - alert: SyncCenterHostOffline
+        expr: synccenter_host_online == 0
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "Syncthing daemon on {{ $labels.host }} is offline"
+          runbook: "docs/runbooks/syncthing-host-down.md"
+
+      - alert: SyncCenterFolderHasConflicts
+        expr: synccenter_conflicts_open > 0
+        for: 1h
+        labels:
+          severity: warn
+        annotations:
+          summary: "{{ $value }} unresolved conflicts"
+          runbook: "docs/runbooks/resolve-conflicts.md"
+
+      - alert: SyncCenterFolderErrors
+        expr: synccenter_folder_errors > 0 or synccenter_folder_pull_errors > 0
+        for: 30m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Folder {{ $labels.folder }} on {{ $labels.host }} has errors"
+
+      - alert: SyncCenterFolderOutOfSyncLong
+        expr: synccenter_folder_state_info{state="syncing"} == 1
+        for: 6h
+        labels:
+          severity: warn
+        annotations:
+          summary: "Folder {{ $labels.folder }} on {{ $labels.host }} has been syncing for 6h+"
+
+      - alert: SyncCenterApplyFailures
+        expr: increase(synccenter_apply_total{result="error"}[1h]) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "Apply failures in the last hour: {{ $value }}"
+
+      - alert: SyncCenterScrapeBackendErrors
+        expr: synccenter_folder_scrape_error == 1
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Metrics scrape failing for {{ $labels.folder }} on {{ $labels.host }} ({{ $labels.reason }})"
