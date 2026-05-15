@@ -1,13 +1,95 @@
-# SyncCenter QNAP deployment — placeholder, populated in Phase 3.
+# SyncCenter QNAP deployment.
 #
-# Final shape (target):
-#   - synccenter-api (Node)            — port 3000, behind Traefik
-#   - synccenter-web (static, served by api)
-#   - synccenter-mcp (stdio or sse)
-#   - syncthing      (LinuxServer.io)  — ports 8384/22000/21027
-#   - rclone-rcd     (sidecar)         — port 5572, localhost only
+# Brings up the API + Syncthing (LinuxServer.io) + rclone rcd, all on the
+# same internal network. Traefik labels expose only synccenter-api as
+# sync.beric.ca.
 #
-# Traefik labels will expose only synccenter-api at sync.beric.ca.
-# Secrets sourced from sops-decrypted env at deploy time.
+# Paths assume the QNAP layout:
+#   /share/Container/synccenter/           — this compose file + persistent state
+#   /share/Container/synccenter/state/     — SQLite + secrets
+#   /share/Container/synccenter/syncthing/ — Syncthing's own config volume
+#   /share/synccenter-config/              — git clone of synccenter-config
+#   /share/Sync/                           — actual synced trees
+#
+# Bring up: docker compose --env-file .env up -d
+# Secrets:  sops -d secrets/api-env.enc.yaml > .env  (one-shot, never committed)
 
-services: {}
+services:
+  synccenter-api:
+    image: oven/bun:1.1-alpine
+    container_name: synccenter-api
+    restart: unless-stopped
+    working_dir: /srv/synccenter
+    command: ["bun", "run", "apps/api/src/index.ts"]
+    volumes:
+      - /share/Container/synccenter/code:/srv/synccenter:ro
+      - /share/synccenter-config:/srv/synccenter-config:rw
+      - /share/Container/synccenter/state:/var/lib/synccenter:rw
+    environment:
+      SC_CONFIG_DIR: /srv/synccenter-config
+      SC_API_TOKEN: ${SC_API_TOKEN}
+      SC_DB_PATH: /var/lib/synccenter/state.sqlite
+      PORT: "3000"
+      SC_RCLONE_URL: http://rclone-rcd:5572
+      SC_RCLONE_USER: ${SC_RCLONE_USER}
+      SC_RCLONE_PASS: ${SC_RCLONE_PASS}
+      SC_HOST_API_KEY_QNAP_TS453D: ${SC_HOST_API_KEY_QNAP_TS453D}
+      SC_HOST_API_KEY_MAC_STUDIO: ${SC_HOST_API_KEY_MAC_STUDIO}
+      SC_HOST_API_KEY_WIN_DESKTOP: ${SC_HOST_API_KEY_WIN_DESKTOP}
+    networks: [edge, internal]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.synccenter.rule=Host(`sync.beric.ca`)"
+      - "traefik.http.routers.synccenter.entrypoints=websecure"
+      - "traefik.http.routers.synccenter.tls.certresolver=le"
+      - "traefik.http.services.synccenter.loadbalancer.server.port=3000"
+    depends_on:
+      - rclone-rcd
+
+  syncthing:
+    image: lscr.io/linuxserver/syncthing:latest
+    container_name: syncthing
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/Toronto
+    volumes:
+      - /share/Container/synccenter/syncthing:/config
+      - /share/Sync:/Sync
+    ports:
+      # Discovery + transport. GUI (8384) is reachable only over the internal
+      # network — exposed here for one-time bootstrap; remove the line once
+      # SyncCenter is the canonical surface.
+      - "8384:8384"
+      - "22000:22000/tcp"
+      - "22000:22000/udp"
+      - "21027:21027/udp"
+    networks: [internal]
+    sysctls:
+      net.core.rmem_max: "7500000"
+      net.core.wmem_max: "7500000"
+
+  rclone-rcd:
+    image: rclone/rclone:latest
+    container_name: rclone-rcd
+    restart: unless-stopped
+    command:
+      [
+        "rcd",
+        "--rc-addr=0.0.0.0:5572",
+        "--rc-user=${SC_RCLONE_USER}",
+        "--rc-pass=${SC_RCLONE_PASS}",
+        "--config=/config/rclone.conf",
+      ]
+    volumes:
+      - /share/homes/eric/.config/rclone:/config:ro
+      - /share/Sync:/Sync
+    networks: [internal]
+
+networks:
+  edge:
+    external: true
+    name: traefik
+  internal:
+    driver: bridge

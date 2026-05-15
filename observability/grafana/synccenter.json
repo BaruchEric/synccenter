@@ -1,0 +1,118 @@
+{
+  "uid": "synccenter",
+  "title": "SyncCenter",
+  "tags": ["synccenter"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "host",
+        "label": "host",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+        "query": "label_values(synccenter_host_online, host)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2
+      },
+      {
+        "name": "folder",
+        "label": "folder",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+        "query": "label_values(synccenter_folder_state_info, folder)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "API up",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value", "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      },
+      "targets": [{ "expr": "synccenter_up", "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROM}" } }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Open conflicts",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] }
+        }
+      },
+      "targets": [{ "expr": "synccenter_conflicts_open", "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROM}" } }]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Hosts",
+      "gridPos": { "x": 8, "y": 0, "w": 16, "h": 8 },
+      "targets": [
+        { "expr": "synccenter_host_online{host=~\"$host\"}", "refId": "A", "format": "table", "instant": true, "datasource": { "type": "prometheus", "uid": "${DS_PROM}" } },
+        { "expr": "synccenter_host_uptime_seconds{host=~\"$host\"}", "refId": "B", "format": "table", "instant": true, "datasource": { "type": "prometheus", "uid": "${DS_PROM}" } }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Value #A" }, "properties": [{ "id": "displayName", "value": "online" }, { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "down", "color": "red" }, "1": { "text": "up", "color": "green" } } }] }] },
+          { "matcher": { "id": "byName", "options": "Value #B" }, "properties": [{ "id": "displayName", "value": "uptime (s)" }] }
+        ]
+      },
+      "transformations": [
+        { "id": "merge" },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true } } }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Folder need_files",
+      "gridPos": { "x": 0, "y": 4, "w": 8, "h": 8 },
+      "targets": [{ "expr": "synccenter_folder_need_files{folder=~\"$folder\", host=~\"$host\"}", "legendFormat": "{{folder}}@{{host}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROM}" } }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Folder errors",
+      "gridPos": { "x": 8, "y": 8, "w": 8, "h": 8 },
+      "targets": [{ "expr": "synccenter_folder_errors{folder=~\"$folder\", host=~\"$host\"} + on() synccenter_folder_pull_errors{folder=~\"$folder\", host=~\"$host\"}", "legendFormat": "{{folder}}@{{host}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROM}" } }]
+    },
+    {
+      "id": 6,
+      "type": "barchart",
+      "title": "Apply outcomes (since start)",
+      "gridPos": { "x": 16, "y": 8, "w": 8, "h": 8 },
+      "targets": [{ "expr": "synccenter_apply_total", "legendFormat": "{{result}}", "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROM}" } }]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Folder state per host",
+      "gridPos": { "x": 0, "y": 12, "w": 16, "h": 8 },
+      "targets": [{ "expr": "synccenter_folder_state_info{folder=~\"$folder\", host=~\"$host\"} == 1", "format": "table", "instant": true, "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROM}" } }],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "Value": true } } }
+      ]
+    }
+  ],
+  "__inputs": [
+    { "name": "DS_PROM", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" }
+  ]
+}
