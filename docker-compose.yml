@@ -1,0 +1,13 @@
+# SyncCenter QNAP deployment — placeholder, populated in Phase 3.
+#
+# Final shape (target):
+#   - synccenter-api (Node)            — port 3000, behind Traefik
+#   - synccenter-web (static, served by api)
+#   - synccenter-mcp (stdio or sse)
+#   - syncthing      (LinuxServer.io)  — ports 8384/22000/21027
+#   - rclone-rcd     (sidecar)         — port 5572, localhost only
+#
+# Traefik labels will expose only synccenter-api at sync.beric.ca.
+# Secrets sourced from sops-decrypted env at deploy time.
+
+services: {}

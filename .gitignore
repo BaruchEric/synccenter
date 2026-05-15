@@ -1,0 +1,31 @@
+node_modules/
+dist/
+build/
+.next/
+.cache/
+.turbo/
+coverage/
+.nyc_output/
+
+*.log
+.DS_Store
+Thumbs.db
+
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Local-only sub-agent overrides
+.claude/settings.local.json
+
+# Build artifacts
+*.tsbuildinfo
+.eslintcache
+
+# Test outputs
+tests/golden/__received__/
+tests/e2e/__artifacts__/

@@ -1,0 +1,19 @@
+{
+  "name": "synccenter",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Unified sync command center — Syncthing + rclone + Git-as-source-of-truth",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "echo 'lint: configure in phase 2'",
+    "typecheck": "echo 'typecheck: configure in phase 2'",
+    "test": "echo 'test: configure in phase 2'",
+    "build": "echo 'build: configure in phase 2'"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}
