@@ -3,22 +3,13 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { RcloneClient, RcloneError, SyncthingError } from "@synccenter/adapters";
-import { RcloneClient as RcloneAdapterClient } from "@synccenter/adapters/rclone";
-import { SyncthingClient } from "@synccenter/adapters/syncthing";
-import {
-  plan as buildPlan,
-  apply as applyPlan,
-  computeDelta,
-  loadFolderManifest,
-  loadAllHosts,
-  createSecretsResolver,
-  type ApplyPlan,
-  type AdapterPool,
-} from "@synccenter/apply-planner";
-import { compile, CompileError } from "@synccenter/rule-compiler";
+import { apply as applyPlan, computeDelta, type ApplyPlan, type AdapterPool } from "@synccenter/apply-planner";
+import { CompileError } from "@synccenter/rule-compiler";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 import { listYamlNames, parseFolderByName } from "../lib/fs.ts";
+import { buildAdapterPool, buildFolderPlan } from "../lib/plan.ts";
+import { respondJsonError } from "../lib/errors.ts";
 import { HostRegistry, HostRegistryError } from "../registry.ts";
 
 export function foldersRouter(
@@ -105,15 +96,10 @@ export function foldersRouter(
 
   r.post("/folders/:name/plan", async (req, res) => {
     try {
-      const p = doBuildPlan(cfg, req.params.name);
+      const p = buildFolderPlan(cfg, req.params.name);
       res.json({ plan: p });
     } catch (err) {
-      res.status(400).json({
-        error: {
-          code: (err as { code?: string }).code ?? "INTERNAL",
-          message: (err as Error).message,
-        },
-      });
+      respondJsonError(res, err);
     }
   });
 
@@ -126,8 +112,8 @@ export function foldersRouter(
         return;
       }
       const { dryRun, prune, force } = req.body ?? {};
-      const p = doBuildPlan(cfg, req.params.name);
-      const pool = doBuildAdapterPool(cfg);
+      const p = buildFolderPlan(cfg, req.params.name);
+      const pool = buildAdapterPool(cfg);
       const live = await collectLiveState(p, pool);
       const delta = computeDelta(p, live as never);
       if (delta.liveOnly.length > 0 && !prune) {
@@ -177,12 +163,7 @@ export function foldersRouter(
         res.status(400).json({ error: { code: "COMPILE_ERROR", message: err.message } });
         return;
       }
-      res.status(500).json({
-        error: {
-          code: (err as { code?: string }).code ?? "INTERNAL",
-          message: (err as Error).message,
-        },
-      });
+      respondJsonError(res, err);
     }
   });
 
@@ -279,49 +260,6 @@ function respondFolderError(res: Response, err: unknown, name: string): void {
     return;
   }
   res.status(500).json({ error: errorMessage(err) });
-}
-
-function doBuildPlan(cfg: ApiConfig, name: string): ApplyPlan {
-  const folder = loadFolderManifest(join(cfg.foldersDir, `${name}.yaml`));
-  const hosts = loadAllHosts(cfg.hostsDir);
-  const secrets = createSecretsResolver({ configDir: cfg.configDir });
-  const compiled = compile(join(cfg.rulesDir, `${folder.ruleset}.yaml`), {
-    rulesetsDir: cfg.rulesDir,
-    importsDir: cfg.importsDir,
-  });
-  const ignoreLines = compiled.stignore.split("\n").filter((l) => l && !l.startsWith("#"));
-  const filtersFile = join(cfg.compiledDir, folder.ruleset, "filter.rclone");
-  return buildPlan({ folder, hosts, compiledIgnoreLines: ignoreLines, filtersFile, secrets });
-}
-
-function doBuildAdapterPool(cfg: ApiConfig): AdapterPool {
-  const hosts = loadAllHosts(cfg.hostsDir);
-  const secrets = createSecretsResolver({ configDir: cfg.configDir });
-  return {
-    syncthing: (h: string) => {
-      const host = hosts[h];
-      if (!host) throw new Error(`unknown host: ${h}`);
-      return new SyncthingClient({
-        baseUrl: host.syncthing.api_url,
-        apiKey: secrets.resolve(host.syncthing.api_key_ref),
-      });
-    },
-    rclone: (h: string) => {
-      const host = hosts[h];
-      if (!host) throw new Error(`unknown host: ${h}`);
-      if (!host.rclone) throw new Error(`host ${h} has no rclone block`);
-      const auth = secrets.resolve(host.rclone.auth_ref);
-      const ci = auth.indexOf(":");
-      if (ci > 0) {
-        return new RcloneAdapterClient({
-          baseUrl: host.rclone.rcd_url,
-          username: auth.slice(0, ci),
-          password: auth.slice(ci + 1),
-        });
-      }
-      return new RcloneAdapterClient({ baseUrl: host.rclone.rcd_url, bearerToken: auth });
-    },
-  };
 }
 
 async function collectLiveState(

@@ -88,7 +88,7 @@ Secrets are injected at deploy time via `--env-file .env`, produced by decryptin
 ## Tests
 
 ```sh
-bun test                        # 117 across rule-compiler, importers, adapters, api, cli, mcp
+bun test                        # 170 across 22 files (rule-compiler, importers, adapters, api, cli, mcp)
 bunx tsc -p apps/api --noEmit
 bunx tsc -p apps/web --noEmit
 ```

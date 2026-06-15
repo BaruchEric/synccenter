@@ -1,50 +1,34 @@
 import { Router } from "express";
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   loadFolderManifest,
   loadAllHosts,
   createSecretsResolver,
-  plan as buildPlan,
   renderCrontab,
 } from "@synccenter/apply-planner";
 import type { SchedulePlan } from "@synccenter/apply-planner";
-import { compile } from "@synccenter/rule-compiler";
 import type { ApiConfig } from "../config.ts";
+import { listYamlNames } from "../lib/fs.ts";
+import { buildFolderPlanFor } from "../lib/plan.ts";
 
 export function scheduleRouter(cfg: ApiConfig): Router {
   const router = Router();
 
-  router.get("/schedule/crontab", async (_req, res) => {
+  router.get("/schedule/crontab", (_req, res) => {
     try {
       const hosts = loadAllHosts(cfg.hostsDir);
       const secrets = createSecretsResolver({ configDir: cfg.configDir });
-
-      const all = readdirSync(cfg.foldersDir).filter(
-        (f) => f.endsWith(".yaml") && !f.startsWith("example-") && f !== "README.md",
-      );
+      const names = listYamlNames(cfg.foldersDir).filter((n) => !n.startsWith("example-"));
 
       const allSchedule: SchedulePlan[] = [];
-      for (const f of all) {
-        const folder = loadFolderManifest(join(cfg.foldersDir, f));
+      for (const name of names) {
+        const folder = loadFolderManifest(join(cfg.foldersDir, `${name}.yaml`));
         if (!folder.cloud) continue;
-        const compiled = compile(join(cfg.rulesDir, `${folder.ruleset}.yaml`), {
-          rulesetsDir: cfg.rulesDir,
-          importsDir: cfg.importsDir,
-        });
-        const filtersFile = join(cfg.compiledDir, folder.ruleset, "filter.rclone");
-        const p = buildPlan({
-          folder,
-          hosts,
-          compiledIgnoreLines: compiled.stignore.split("\n"),
-          filtersFile,
-          secrets,
-        });
+        const p = buildFolderPlanFor(cfg, folder, hosts, secrets);
         allSchedule.push(...p.schedule);
       }
 
-      const text = renderCrontab(allSchedule);
-      res.type("text/plain").send(text);
+      res.type("text/plain").send(renderCrontab(allSchedule));
     } catch (err) {
       res.status(500).type("text/plain").send(`# error: ${(err as Error).message}\n`);
     }
