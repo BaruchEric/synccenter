@@ -1,14 +1,13 @@
 import { Router, type Response } from "express";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { RcloneClient, RcloneError, SyncthingError } from "@synccenter/adapters";
-import { apply as applyPlan, computeDelta, type ApplyPlan, type AdapterPool } from "@synccenter/apply-planner";
 import { CompileError } from "@synccenter/rule-compiler";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 import { listYamlNames, parseFolderByName } from "../lib/fs.ts";
-import { buildAdapterPool, buildFolderPlan } from "../lib/plan.ts";
+import { buildFolderPlan } from "../lib/plan.ts";
+import { applyFolder, createFolder, FolderServiceError } from "../lib/folders-service.ts";
 import { respondJsonError } from "../lib/errors.ts";
 import { HostRegistry, HostRegistryError } from "../registry.ts";
 
@@ -22,6 +21,23 @@ export function foldersRouter(
 
   r.get("/folders", (_req, res) => {
     res.json({ folders: listYamlNames(cfg.foldersDir) });
+  });
+
+  r.post("/folders", (req, res) => {
+    try {
+      const created = createFolder(cfg, req.body);
+      res.status(201).json({ folder: created.manifest, path: created.relPath });
+    } catch (err) {
+      if (err instanceof FolderServiceError) {
+        res
+          .status(err.code === "NAME_TAKEN" ? 409 : 400)
+          .json({ error: { code: err.code, message: err.message } });
+        return;
+      }
+      // Anything else here (e.g. a filesystem write fault, which carries a
+      // `code` like EACCES) is a server fault, not a client error — 500, not 400.
+      respondJsonError(res, err, { knownStatus: 500 });
+    }
   });
 
   r.get("/folders/:name", (req, res) => {
@@ -112,52 +128,24 @@ export function foldersRouter(
         return;
       }
       const { dryRun, prune, force } = req.body ?? {};
-      const p = buildFolderPlan(cfg, req.params.name);
-      const pool = buildAdapterPool(cfg);
-      const live = await collectLiveState(p, pool);
-      const delta = computeDelta(p, live as never);
-      if (delta.liveOnly.length > 0 && !prune) {
+      const outcome = await applyFolder(cfg, db, req.params.name, {
+        dryRun,
+        prune,
+        force,
+        actor: "api-bearer",
+        source: "api",
+      });
+      if (outcome.kind === "blocked") {
         res.status(409).json({
           error: {
-            code: "LIVE_ONLY",
-            message: "pass prune:true to apply",
-            details: delta.liveOnly,
+            code: outcome.code,
+            message: outcome.code === "LIVE_ONLY" ? "pass prune:true to apply" : "pass force:true to apply",
+            details: outcome.details,
           },
         });
         return;
       }
-      if (delta.divergent.length > 0 && !force) {
-        res.status(409).json({
-          error: {
-            code: "DIVERGENT",
-            message: "pass force:true to apply",
-            details: delta.divergent,
-          },
-        });
-        return;
-      }
-      const result = await applyPlan(p, pool, { dryRun, prune, force });
-
-      // Record history for auditability.
-      const overallOk = result.hosts.every((h) => h.status !== "failed");
-      const planJson = JSON.stringify({ folder: p.folder, perHost: p.perHost });
-      const payloadHash = createHash("sha256").update(planJson).digest("hex").slice(0, 16);
-      db.run(
-        `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
-         VALUES (?, ?, 'api', 'folder', ?, ?, ?, ?)`,
-        [
-          new Date().toISOString(),
-          "api-bearer",
-          p.folder,
-          payloadHash,
-          overallOk ? "ok" : "error",
-          overallOk
-            ? null
-            : `failures: ${result.hosts.filter((h) => h.status === "failed").length}/${result.hosts.length}`,
-        ],
-      );
-
-      res.json({ result, delta });
+      res.json({ result: outcome.result, delta: outcome.delta });
     } catch (err) {
       if (err instanceof CompileError) {
         res.status(400).json({ error: { code: "COMPILE_ERROR", message: err.message } });
@@ -221,11 +209,12 @@ export function foldersRouter(
       });
       db.run(
         `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
-         VALUES (?, 'api-bearer', 'api', 'folder', ?, ?, 'ok', ?)`,
+         VALUES (?, 'api-bearer', 'api', 'folder', ?, ?, ?, ?)`,
         [
           new Date().toISOString(),
           m.name,
           "bisync-trigger",
+          dryRun ? "dry-run" : "ok",
           `path1=${path1} path2=${path2}${async ? " async" : ""}${dryRun ? " dryRun" : ""}${resync ? " resync" : ""}`,
         ],
       );
@@ -260,34 +249,4 @@ function respondFolderError(res: Response, err: unknown, name: string): void {
     return;
   }
   res.status(500).json({ error: errorMessage(err) });
-}
-
-async function collectLiveState(
-  p: ApplyPlan,
-  pool: AdapterPool,
-): Promise<Record<string, { folder: unknown; ignores: unknown }>> {
-  const out: Record<string, { folder: unknown; ignores: unknown }> = {};
-  for (const host of Object.keys(p.perHost)) {
-    const c = pool.syncthing(host);
-    let folder: unknown = null;
-    let ignores: unknown = null;
-    try {
-      folder = await c.getFolder(p.folder);
-    } catch {
-      // 404 — folder doesn't exist on this host yet.
-    }
-    if (folder) {
-      try {
-        const ig = await c.getIgnores(p.folder);
-        ignores = ig.ignore ?? [];
-      } catch {
-        ignores = [];
-      }
-      // Bridge: planner type requires label; adapter type doesn't.
-      const f = folder as { id: string; label?: string };
-      if (f.label === undefined) f.label = f.id;
-    }
-    out[host] = { folder, ignores };
-  }
-  return out;
 }

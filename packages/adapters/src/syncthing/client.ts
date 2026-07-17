@@ -70,6 +70,16 @@ export class SyncthingClient {
     return this.json("GET", `/rest/db/status?folder=${encodeURIComponent(id)}`);
   }
 
+  /**
+   * GET /rest/system/browse?current=... — directory-path completions on the
+   * daemon's own filesystem (what the Syncthing GUI folder picker uses).
+   * Returns absolute directory paths matching the prefix.
+   */
+  browse(current = ""): Promise<string[]> {
+    const q = current ? `?current=${encodeURIComponent(current)}` : "";
+    return this.json("GET", `/rest/system/browse${q}`);
+  }
+
   /** GET /rest/db/ignores?folder=ID */
   getIgnores(folder: string): Promise<SyncthingIgnores> {
     return this.json("GET", `/rest/db/ignores?folder=${encodeURIComponent(folder)}`);

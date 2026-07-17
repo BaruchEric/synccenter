@@ -6,7 +6,16 @@ Versions group commits by phase; see `git log` for individual commits.
 ## [Unreleased]
 
 ### Added
+- HTMX console at `/ui` on the API (no build step, htmx served from node_modules): sign-in via the API token (HttpOnly cookie scoped to `/ui`), sync-job list, a create form with live YAML manifest preview + inline name validation + plan preview, and a job detail page with plan, dry-run-default apply (arm checkbox required for real applies, prune/force affordances on 409), per-host live state, and apply history.
+- `POST /folders` JSON endpoint — validates against folder.schema.json + config-repo coherence (ruleset/hosts exist, name free) and writes canonical YAML via the state-importer emitter. 201/400/409 with coded errors.
+- `validateFolderManifest()` export in `@synccenter/apply-planner` for in-memory schema validation.
+- Form pickers: per-host path completion via each host's Syncthing `/rest/system/browse` (new `SyncthingClient.browse()`), rclone remote-name + remote-path completion via `config/listremotes` and a new `RcloneClient.listDirs()` (`operations/list`, dirsOnly), and a cron preset menu with a live plain-English readout of the bisync schedule. All degrade to silent-empty when the backing daemon is unreachable.
 - Top-level README + this changelog.
+
+### Changed
+- `POST /folders/:name/apply` route refactored onto a shared `applyFolder` service (used by both the JSON API and the UI); dry runs now record `result: dry-run` in apply_history instead of `ok`.
+- `GET /` now redirects to `/ui/jobs`.
+- docker-compose: syncthing and rclone-rcd now bind the whole `/share` at `/share` (host-path parity) instead of `/share/Sync` at `/Sync`, so folder-manifest paths anywhere under `/share` resolve inside both containers. Note: this gives both daemons read-write access to the entire share tree. Applied to the live QNAP deploy 2026-07-16.
 
 ## [phase-5]
 

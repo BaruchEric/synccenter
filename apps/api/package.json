@@ -17,6 +17,7 @@
     "@synccenter/rule-compiler": "workspace:*",
     "@synccenter/state-importer": "workspace:*",
     "express": "^4.21.0",
+    "htmx.org": "^2.0.4",
     "yaml": "^2.5.0"
   },
   "devDependencies": {

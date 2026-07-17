@@ -6,6 +6,8 @@ export type {
   RcloneAbout,
   RcloneJobList,
   RcloneJobStatus,
+  RcloneListItem,
+  RcloneListResult,
   RclonePid,
   RcloneRemoteList,
   RcloneStats,

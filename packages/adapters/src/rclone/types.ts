@@ -45,6 +45,19 @@ export interface RcloneRemoteList {
   remotes: string[];
 }
 
+export interface RcloneListItem {
+  Path: string;
+  Name: string;
+  IsDir: boolean;
+  Size?: number;
+  ModTime?: string;
+  MimeType?: string;
+}
+
+export interface RcloneListResult {
+  list: RcloneListItem[];
+}
+
 export interface RcloneAbout {
   total?: number;
   used?: number;

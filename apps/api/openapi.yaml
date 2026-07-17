@@ -6,6 +6,9 @@ info:
     Read-side and skeleton write-side for the SyncCenter command center. Mutating endpoints
     that need the Syncthing/rclone adapters return 501 until Phase 3 wiring is complete.
 
+    A server-rendered HTMX console lives at /ui (cookie session auth, same token);
+    everything under /ui is outside this JSON contract.
+
 servers:
   - url: https://sync.beric.ca
     description: Production
@@ -53,6 +56,31 @@ paths:
                   folders:
                     type: array
                     items: { type: string }
+    post:
+      summary: Create a folder (sync job) manifest
+      description: |
+        Validates against folder.schema.json plus config-repo coherence (ruleset and
+        hosts must exist) and writes canonical YAML to folders/<name>.yaml.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: "FolderManifest — see packages/schema/folder.schema.json" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [folder, path]
+                properties:
+                  folder: { type: object }
+                  path: { type: string, description: "Repo-relative path, e.g. folders/media.yaml" }
+        "400":
+          description: SCHEMA_INVALID | UNKNOWN_RULESET | UNKNOWN_HOST
+        "409":
+          description: NAME_TAKEN — folders/<name>.yaml already exists
 
   /folders/{name}:
     get:

@@ -56,7 +56,7 @@ services:
       TZ: America/Toronto
     volumes:
       - /share/Container/synccenter/syncthing:/config
-      - /share/Sync:/Sync
+      - /share:/share
     ports:
       # Discovery + transport. GUI (8384) is reachable only over the internal
       # network — exposed here for one-time bootstrap; remove the line once
@@ -84,7 +84,7 @@ services:
       ]
     volumes:
       - /share/homes/eric/.config/rclone:/config:ro
-      - /share/Sync:/Sync
+      - /share:/share
     networks: [internal]
 
 networks:

@@ -13,6 +13,7 @@ import { rcloneRouter } from "./routes/rclone.ts";
 import { scheduleRouter } from "./routes/schedule.ts";
 import { stateRouter } from "./routes/state.ts";
 import { systemRouter } from "./routes/system.ts";
+import { uiRouter } from "./ui/router.ts";
 import { HostRegistry } from "./registry.ts";
 
 export interface BuildAppDeps {
@@ -55,6 +56,10 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
     res.json({ ok: true, version: PKG_VERSION });
   });
   app.get("/metrics", metricsHandlerFactory(cfg, reg, database));
+
+  // Server-rendered HTMX console — cookie session auth, scoped to /ui.
+  app.get("/", (_req, res) => res.redirect("/ui/jobs"));
+  app.use("/ui", uiRouter({ cfg, registry: reg, db: database, rclone: rcloneClient }));
 
   app.use(bearerAuth(cfg.apiToken));
 

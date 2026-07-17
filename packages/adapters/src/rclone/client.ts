@@ -5,6 +5,7 @@ import type {
   RcloneAbout,
   RcloneJobList,
   RcloneJobStatus,
+  RcloneListResult,
   RclonePid,
   RcloneRemoteList,
   RcloneStats,
@@ -75,6 +76,14 @@ export class RcloneClient {
 
   about(fs: string): Promise<RcloneAbout> {
     return this.call("operations/about", { fs });
+  }
+
+  /**
+   * POST operations/list with dirsOnly — directory entries under `remote`
+   * (a path within `fs`, "" for the root). Used for remote-path completion.
+   */
+  listDirs(fs: string, remote: string): Promise<RcloneListResult> {
+    return this.call("operations/list", { fs, remote, opt: { dirsOnly: true } });
   }
 
   // ---- jobs ----

@@ -70,6 +70,19 @@ export interface HostManifest {
   rclone?: { rcd_url: string; auth_ref: string };
 }
 
+export type FolderValidation =
+  | { ok: true; manifest: FolderManifest }
+  | { ok: false; errors: string };
+
+/** Validate an in-memory value against folder.schema.json (no file involved). */
+export function validateFolderManifest(value: unknown): FolderValidation {
+  const validate = folderSchema();
+  if (!validate(value)) {
+    return { ok: false, errors: ajv.errorsText(validate.errors) };
+  }
+  return { ok: true, manifest: value as FolderManifest };
+}
+
 export function loadFolderManifest(path: string): FolderManifest {
   let raw: string;
   try {
@@ -81,15 +94,11 @@ export function loadFolderManifest(path: string): FolderManifest {
       cause,
     );
   }
-  const parsed = parse(raw);
-  const validate = folderSchema();
-  if (!validate(parsed)) {
-    throw new PlanError(
-      `SCHEMA_INVALID in ${path}: ${ajv.errorsText(validate.errors)}`,
-      "SCHEMA_INVALID",
-    );
+  const v = validateFolderManifest(parse(raw));
+  if (!v.ok) {
+    throw new PlanError(`SCHEMA_INVALID in ${path}: ${v.errors}`, "SCHEMA_INVALID");
   }
-  return parsed as FolderManifest;
+  return v.manifest;
 }
 
 export function loadHostManifest(path: string): HostManifest {
