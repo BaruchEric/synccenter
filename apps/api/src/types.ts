@@ -2,13 +2,11 @@ export interface FolderManifest {
   name: string;
   ruleset: string;
   type: string;
+  /** Per-member paths: local absolute path for syncthing members, remote path for rclone members. */
   paths: Record<string, string>;
-  cloud?: {
-    rclone_remote: string;
-    remote_path: string;
-    bisync?: {
-      schedule?: string;
-      flags?: string[];
-    };
+  bisync?: {
+    anchor?: string;
+    schedule?: string;
+    flags?: string[];
   };
 }

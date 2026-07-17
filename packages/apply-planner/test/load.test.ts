@@ -12,11 +12,11 @@ describe("loadFolderManifest", () => {
     expect(f.paths).toBeDefined();
   });
 
-  it("loads example-code-projects.yaml with cloud + bisync", () => {
+  it("loads example-code-projects.yaml with an rclone member + bisync", () => {
     const f = loadFolderManifest(join(FIX, "folders/example-code-projects.yaml"));
     expect(f.name).toBe("example-code-projects");
-    expect(f.cloud?.rclone_remote).toBe("gdrive");
-    expect(f.cloud?.bisync?.schedule).toBe("*/15 * * * *");
+    expect(f.paths["gdrive"]).toBe("sync/code");
+    expect(f.bisync?.schedule).toBe("*/15 * * * *");
   });
 
   it("throws PlanError(MANIFEST_NOT_FOUND) when the file doesn't exist", () => {
@@ -40,7 +40,8 @@ describe("loadFolderManifest", () => {
 describe("loadAllHosts", () => {
   it("returns every host in hosts/ keyed by name", () => {
     const hosts = loadAllHosts(join(FIX, "hosts"));
-    expect(Object.keys(hosts).sort()).toEqual(["mac-studio", "qnap-ts453d", "win-desktop"]);
+    expect(Object.keys(hosts).sort()).toEqual(["gdrive", "mac-studio", "qnap-ts453d", "win-desktop"]);
+    expect(hosts["gdrive"]?.engine).toBe("rclone");
   });
 
   it("throws PlanError(SCHEMA_INVALID) when a host file is malformed", () => {

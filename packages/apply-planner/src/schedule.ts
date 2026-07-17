@@ -1,22 +1,29 @@
 import { mapPolicy } from "./conflict.ts";
-import type { FolderManifest, HostManifest } from "./load.ts";
+import type { FolderManifest, RcloneHostManifest, SyncthingHostManifest } from "./load.ts";
 import type { SchedulePlan, HostName } from "./types.ts";
 
+/**
+ * Build the scheduled bisync leg between one rclone member and the anchor.
+ * Returns [] when the member has no effective schedule (bisync is opt-in).
+ */
 export function buildSchedulePlan(
   folder: FolderManifest,
-  anchor: HostManifest,
+  member: RcloneHostManifest,
+  anchor: SyncthingHostManifest,
   filtersFile: string,
 ): SchedulePlan[] {
-  if (!folder.cloud) return [];
-  const schedule = folder.cloud.bisync?.schedule;
+  const memberOverride = folder.overrides?.[member.name]?.bisync ?? {};
+  const schedule = memberOverride.schedule ?? folder.bisync?.schedule;
   if (!schedule) return [];
 
   const localPath = folder.paths[anchor.name];
   if (!localPath) return [];
+  const memberPath = folder.paths[member.name];
+  if (!memberPath) return [];
 
-  const remotePath = `${folder.cloud.rclone_remote}:${folder.cloud.remote_path}`;
+  const remotePath = `${member.remote}:${memberPath}`;
   const conflictFlags = mapPolicy(folder.conflict?.policy).rcloneFlags;
-  const userFlags = folder.cloud.bisync?.flags ?? [];
+  const userFlags = memberOverride.flags ?? folder.bisync?.flags ?? [];
 
   // Strip any user-supplied --conflict-* flags so the unified policy wins,
   // unless the user explicitly opted out via conflict.policy missing AND raw flags present.
@@ -37,6 +44,7 @@ export function buildSchedulePlan(
 
   return [{
     anchor: anchor.name as HostName,
+    member: member.name as HostName,
     folder: folder.name,
     cron: schedule,
     command: cmd,

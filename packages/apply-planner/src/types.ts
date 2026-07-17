@@ -30,6 +30,8 @@ export type SyncthingOp =
 
 export interface SchedulePlan {
   anchor: HostName;
+  /** The rclone member this leg syncs with the anchor. */
+  member: HostName;
   folder: string;
   cron: string;
   command: string;

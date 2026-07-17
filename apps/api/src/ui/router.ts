@@ -116,13 +116,14 @@ export function uiRouter({ cfg, registry, db, rclone }: UiDeps): Router {
     for (const row of rows) last.set(row.name, { ts: row.ts, result: row.result });
     res
       .type("html")
-      .send(jobsListPage(manifests.map((m) => ({ manifest: m, lastApply: last.get(m.name) }))));
+      .send(jobsListPage(manifests.map((m) => ({ manifest: m, lastApply: last.get(m.name) })), registry.rcloneNames()));
   });
 
   /* ---------- new job (must precede /jobs/:name) ---------- */
 
   r.get("/jobs/new", (_req, res) => {
-    res.type("html").send(newJobPage(listYamlNames(cfg.rulesDir), listYamlNames(cfg.hostsDir)));
+    const hostNames = listYamlNames(cfg.hostsDir);
+    res.type("html").send(newJobPage(listYamlNames(cfg.rulesDir), hostNames, registry.rcloneNames(hostNames)));
   });
 
   /* ---------- fragments ---------- */
@@ -136,7 +137,8 @@ export function uiRouter({ cfg, registry, db, rclone }: UiDeps): Router {
   // ":sftp,host=…:") that would let browse-remote enumerate the rcd host's FS.
   const REMOTE_NAME_RE = /^[A-Za-z0-9_.-]+$/;
 
-  // Directory completions on a host, via its Syncthing /rest/system/browse.
+  // Directory completions on a member — Syncthing /rest/system/browse for
+  // devices, rclone lsjson inside the remote for rclone members.
   r.get("/frag/browse-host", async (req, res) => {
     const host = qstr(req, "host");
     const path = qstr(req, "path");
@@ -147,56 +149,39 @@ export function uiRouter({ cfg, registry, db, rclone }: UiDeps): Router {
     }
     let dirs: string[] = [];
     if (host) {
-      try {
-        // Empty field → browse the filesystem root so volumes/top-level shares
-        // show up as starting points ("/share/…" on QNAP, "/Users/…" on macOS).
-        // Cap generously — QNAP's /share alone has ~45 entries (HD*_DATA stubs).
-        dirs = (await registry.client(host).browse(path || "/")).slice(0, 80);
-      } catch {
-        // Host offline / no key — typing still works, just no suggestions.
+      if (registry.isRclone(host)) {
+        const remote = (registry.manifest(host)?.remote ?? "").replace(/:+$/, "");
+        if (rclone && remote && REMOTE_NAME_RE.test(remote)) {
+          const slash = path.lastIndexOf("/");
+          const parent = slash === -1 ? "" : path.slice(0, slash);
+          const frag = slash === -1 ? path : path.slice(slash + 1);
+          try {
+            const out = await rclone.listDirs(`${remote}:`, parent);
+            dirs = (out.list ?? [])
+              .filter((e) => e.IsDir && (frag === "" || e.Name.toLowerCase().startsWith(frag.toLowerCase())))
+              .map((e) => e.Path)
+              .slice(0, 30);
+          } catch {
+            // Remote missing / rcd offline — no suggestions.
+          }
+        }
+      } else {
+        try {
+          // Empty field → browse the filesystem root so volumes/top-level shares
+          // show up as starting points ("/share/…" on QNAP, "/Users/…" on macOS).
+          // Cap generously — QNAP's /share alone has ~45 entries (HD*_DATA stubs).
+          dirs = (await registry.client(host).browse(path || "/")).slice(0, 80);
+        } catch {
+          // Host offline / no key — typing still works, just no suggestions.
+        }
       }
     }
     res.type("html").send(datalist(dl, dirs).html);
   });
 
-  // rclone remote names for the cloud_remote field.
-  r.get("/frag/remotes", async (_req, res) => {
-    let names: string[] = [];
-    if (rclone) {
-      try {
-        names = (await rclone.listRemotes()).remotes ?? [];
-      } catch {
-        // rcd unreachable — leave the list empty.
-      }
-    }
-    res.type("html").send(datalist("dl-remotes", names).html);
-  });
-
-  // Directory completions inside an rclone remote for cloud_path.
-  r.get("/frag/browse-remote", async (req, res) => {
-    const remote = qstr(req, "cloud_remote").replace(/:+$/, "");
-    const typed = qstr(req, "cloud_path");
-    let dirs: string[] = [];
-    if (rclone && remote && REMOTE_NAME_RE.test(remote)) {
-      const slash = typed.lastIndexOf("/");
-      const parent = slash === -1 ? "" : typed.slice(0, slash);
-      const frag = slash === -1 ? typed : typed.slice(slash + 1);
-      try {
-        const out = await rclone.listDirs(`${remote}:`, parent);
-        dirs = (out.list ?? [])
-          .filter((e) => e.IsDir && (frag === "" || e.Name.toLowerCase().startsWith(frag.toLowerCase())))
-          .map((e) => e.Path)
-          .slice(0, 30);
-      } catch {
-        // Remote missing / rcd offline — no suggestions.
-      }
-    }
-    res.type("html").send(datalist("dl-cloud-path", dirs).html);
-  });
-
   // Plain-English readout for the bisync cron expression.
   r.post("/frag/cron-hint", (req, res) => {
-    const expr = str(req.body as FormBody, "cloud_schedule");
+    const expr = str(req.body as FormBody, "bisync_schedule");
     if (!expr) {
       res.type("html").send(html`<span id="cron-hint" class="name-check"></span>`.html);
       return;
@@ -229,7 +214,7 @@ export function uiRouter({ cfg, registry, db, rclone }: UiDeps): Router {
   });
 
   r.post("/frag/preview", (req, res) => {
-    const parsed = parseJobForm(req.body as FormBody);
+    const parsed = parseJobForm(req.body as FormBody, registry.rcloneNames());
     const errors = [...parsed.errors, ...repoChecks(cfg, parsed.manifest, { checkName: true })];
     if (errors.length === 0) {
       const v = validateFolderManifest(parsed.manifest);
@@ -244,7 +229,7 @@ ${yamlPane(parsed.manifest.name, yaml)}`;
   });
 
   r.post("/frag/preview-plan", (req, res) => {
-    const parsed = parseJobForm(req.body as FormBody);
+    const parsed = parseJobForm(req.body as FormBody, registry.rcloneNames());
     const errors = [...parsed.errors, ...repoChecks(cfg, parsed.manifest, { checkName: false })];
     if (errors.length > 0) {
       res.status(422).type("html").send(errorPanel(errors, "Fix the form before planning").html);
@@ -261,7 +246,7 @@ ${yamlPane(parsed.manifest.name, yaml)}`;
   /* ---------- create ---------- */
 
   r.post("/jobs", (req, res) => {
-    const parsed = parseJobForm(req.body as FormBody);
+    const parsed = parseJobForm(req.body as FormBody, registry.rcloneNames());
     if (parsed.errors.length > 0) {
       res.status(422).type("html").send(errorPanel(parsed.errors, "Fix before creating").html);
       return;
@@ -310,7 +295,7 @@ ${yamlPane(parsed.manifest.name, yaml)}`;
          WHERE target_kind = 'folder' AND target_name = ? ORDER BY id DESC LIMIT 8`,
       )
       .all(name) as HistoryRow[];
-    res.type("html").send(jobDetailPage(name, manifest, yaml, history));
+    res.type("html").send(jobDetailPage(name, manifest, yaml, history, registry.rcloneNames()));
   });
 
   r.get("/jobs/:name/state", async (req, res) => {
@@ -318,6 +303,7 @@ ${yamlPane(parsed.manifest.name, yaml)}`;
     if (!manifest) return;
     const states: HostFolderState[] = await Promise.all(
       Object.keys(manifest.paths).map(async (host) => {
+        if (registry.isRclone(host)) return { host, ok: true, rclone: true };
         try {
           const status = await registry.client(host).getFolderStatus(manifest.name);
           return { host, ok: true, state: status.state, needBytes: status.needBytes };

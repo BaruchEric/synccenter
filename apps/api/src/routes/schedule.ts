@@ -5,6 +5,7 @@ import {
   loadAllHosts,
   createSecretsResolver,
   renderCrontab,
+  folderHasRcloneMember,
 } from "@synccenter/apply-planner";
 import type { SchedulePlan } from "@synccenter/apply-planner";
 import type { ApiConfig } from "../config.ts";
@@ -23,7 +24,7 @@ export function scheduleRouter(cfg: ApiConfig): Router {
       const allSchedule: SchedulePlan[] = [];
       for (const name of names) {
         const folder = loadFolderManifest(join(cfg.foldersDir, `${name}.yaml`));
-        if (!folder.cloud) continue;
+        if (!folderHasRcloneMember(folder, hosts)) continue;
         const p = buildFolderPlanFor(cfg, folder, hosts, secrets);
         allSchedule.push(...p.schedule);
       }

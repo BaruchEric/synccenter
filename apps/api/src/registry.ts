@@ -7,11 +7,15 @@ import { listYamlNames } from "./lib/fs.ts";
 
 export interface HostManifest {
   name: string;
+  /** syncthing (default) = live mesh device; rclone = bisync'd remote (cloud storage, ...). */
+  engine?: "syncthing" | "rclone";
+  /** rclone remote name — engine: rclone members only. */
+  remote?: string;
   hostname?: string;
   ip?: string;
-  os: "macos" | "linux" | "windows" | "qnap";
-  role: "mesh-node" | "hub" | "cloud-edge";
-  syncthing: {
+  os?: "macos" | "linux" | "windows" | "qnap";
+  role?: "mesh-node" | "hub" | "cloud-edge";
+  syncthing?: {
     install_method: string;
     api_url: string;
     api_key_ref?: string;
@@ -42,6 +46,16 @@ export class HostRegistry {
 
   list(): string[] {
     return listYamlNames(this.cfg.hostsDir);
+  }
+
+  /** True when the host declares engine: rclone — a bisync'd member, not a Syncthing device. */
+  isRclone(name: string): boolean {
+    return this.manifest(name)?.engine === "rclone";
+  }
+
+  /** The engine: rclone subset of `names` (defaults to every registered host). */
+  rcloneNames(names: string[] = this.list()): Set<string> {
+    return new Set(names.filter((n) => this.isRclone(n)));
   }
 
   manifest(name: string): HostManifest | undefined {

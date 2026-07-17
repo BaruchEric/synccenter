@@ -1,7 +1,15 @@
 import { html, type Raw } from "./html.ts";
 import { TYPES } from "./form.ts";
 import { crumbLink, page } from "./layout.ts";
-import { cloudBadge, historyTable, hostChip, typeBadge, yamlPane, type HistoryRow } from "./render.ts";
+import {
+  cloudBadge,
+  historyTable,
+  hostChip,
+  rcloneMembersOf,
+  typeBadge,
+  yamlPane,
+  type HistoryRow,
+} from "./render.ts";
 
 /** Display shape — satisfied by both the strict planner manifest and the loose disk-parsed one. */
 export interface JobManifestView {
@@ -9,7 +17,6 @@ export interface JobManifestView {
   ruleset: string;
   type: string;
   paths: Record<string, string>;
-  cloud?: { rclone_remote: string; remote_path: string } | undefined;
 }
 
 /* ---------- login ---------- */
@@ -38,7 +45,7 @@ export interface JobListRow {
   lastApply?: { ts: string; result: string } | undefined;
 }
 
-export function jobsListPage(rows: JobListRow[]): string {
+export function jobsListPage(rows: JobListRow[], rcloneHosts: ReadonlySet<string>): string {
   const body = html`
 <div class="page-head">
   <h1>sync jobs</h1>
@@ -58,10 +65,10 @@ ${
   ${rows.map((r) => {
     const m = r.manifest;
     return html`<a class="job-row" href="/ui/jobs/${m.name}">
-    <span class="name">${m.name} ${cloudBadge(m.cloud)}</span>
+    <span class="name">${m.name} ${cloudBadge(rcloneMembersOf(m.paths, rcloneHosts))}</span>
     <span>${typeBadge(m.type)}</span>
     <span class="cell">${m.ruleset}</span>
-    <span class="hosts">${Object.keys(m.paths).map(hostChip)}</span>
+    <span class="hosts">${Object.keys(m.paths).filter((h) => !rcloneHosts.has(h)).map(hostChip)}</span>
     <span class="cell">${r.lastApply ? html`${r.lastApply.ts.slice(0, 16).replace("T", " ")} · ${r.lastApply.result}` : "never"}</span>
   </a>`;
   })}
@@ -92,7 +99,8 @@ export function hostRowFragment(hosts: string[], uid: string): Raw {
 </div>`;
 }
 
-export function newJobPage(rules: string[], hosts: string[]): string {
+export function newJobPage(rules: string[], hosts: string[], rcloneHosts: ReadonlySet<string>): string {
+  const anchorHosts = hosts.filter((h) => !rcloneHosts.has(h));
   const body = html`
 <div class="page-head">
   <h1>new sync job</h1>
@@ -130,7 +138,7 @@ export function newJobPage(rules: string[], hosts: string[]): string {
     </fieldset>
 
     <fieldset class="sect">
-      <div class="sect-head"><code class="sect-key">paths:</code><span class="sect-hint">where this folder lives on each host</span></div>
+      <div class="sect-head"><code class="sect-key">paths:</code><span class="sect-hint">where this folder lives on each member — local path on devices, remote path on cloud members (gdrive, …)</span></div>
       <div id="host-rows">${hostRowFragment(hosts, "0")}</div>
       <button type="button" class="btn btn-sm" hx-get="/ui/frag/host-row" hx-target="#host-rows" hx-swap="beforeend">+ Add host</button>
     </fieldset>
@@ -167,37 +175,24 @@ export function newJobPage(rules: string[], hosts: string[]): string {
     </fieldset>
 
     <details class="opt">
-      <summary><code class="sect-key">cloud:</code><span class="sect-hint">bisync one host's copy to an rclone remote (optional)</span></summary>
+      <summary><code class="sect-key">bisync:</code><span class="sect-hint">schedule for rclone members added under paths (gdrive, …)</span></summary>
       <div class="opt-body">
         <div class="field-row">
           <div class="field">
-            <label for="f-cloud-remote">rclone remote</label>
-            <input class="in mono-in" id="f-cloud-remote" name="cloud_remote" list="dl-remotes" placeholder="gdrive" spellcheck="false"
-              hx-get="/ui/frag/remotes" hx-trigger="focus once" hx-target="#dl-remotes" hx-swap="outerHTML">
-            <datalist id="dl-remotes"></datalist>
-          </div>
-          <div class="field">
-            <label for="f-cloud-path">Remote path</label>
-            <input class="in mono-in" id="f-cloud-path" name="cloud_path" list="dl-cloud-path" placeholder="sync/media-photos" spellcheck="false"
-              hx-get="/ui/frag/browse-remote" hx-trigger="focus, input changed delay:400ms" hx-include="#f-cloud-remote" hx-target="#dl-cloud-path" hx-swap="outerHTML">
-            <datalist id="dl-cloud-path"></datalist>
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="f-cloud-anchor">Anchor host</label>
-            <select class="in" id="f-cloud-anchor" name="cloud_anchor">
+            <label for="f-bisync-anchor">Anchor host</label>
+            <select class="in" id="f-bisync-anchor" name="bisync_anchor">
               <option value="">auto — the role: cloud-edge host</option>
-              ${hosts.map((h) => html`<option value="${h}">${h}</option>`)}
+              ${anchorHosts.map((h) => html`<option value="${h}">${h}</option>`)}
             </select>
+            <span class="help">Runs the bisync jobs; its local copy is one side of each leg</span>
           </div>
           <div class="field">
-            <label for="f-cloud-schedule">Bisync schedule (cron)</label>
+            <label for="f-bisync-schedule">Bisync schedule (cron)</label>
             <div class="cron-row">
-              <input class="in mono-in" id="f-cloud-schedule" name="cloud_schedule" placeholder="*/30 * * * *" spellcheck="false"
+              <input class="in mono-in" id="f-bisync-schedule" name="bisync_schedule" placeholder="*/30 * * * *" spellcheck="false"
                 hx-post="/ui/frag/cron-hint" hx-trigger="input changed delay:300ms" hx-target="#cron-hint" hx-swap="outerHTML">
               <select class="in" aria-label="Cron presets"
-                onchange="var i=document.getElementById('f-cloud-schedule'); if(this.value){i.value=this.value; i.dispatchEvent(new Event('input',{bubbles:true}));} this.selectedIndex=0;">
+                onchange="var i=document.getElementById('f-bisync-schedule'); if(this.value){i.value=this.value; i.dispatchEvent(new Event('input',{bubbles:true}));} this.selectedIndex=0;">
                 <option value="">presets…</option>
                 <option value="*/15 * * * *">every 15 minutes</option>
                 <option value="*/30 * * * *">every 30 minutes</option>
@@ -211,8 +206,8 @@ export function newJobPage(rules: string[], hosts: string[]): string {
           </div>
         </div>
         <div class="field">
-          <label for="f-cloud-flags">Extra bisync flags — one per line</label>
-          <textarea class="in" id="f-cloud-flags" name="cloud_flags" rows="2" placeholder="--max-delete 50" spellcheck="false"></textarea>
+          <label for="f-bisync-flags">Extra bisync flags — one per line</label>
+          <textarea class="in" id="f-bisync-flags" name="bisync_flags" rows="2" placeholder="--max-delete 50" spellcheck="false"></textarea>
         </div>
       </div>
     </details>
@@ -274,8 +269,10 @@ export function jobDetailPage(
   manifest: JobManifestView,
   yaml: string,
   history: HistoryRow[],
+  rcloneHosts: ReadonlySet<string>,
 ): string {
   const hosts = Object.keys(manifest.paths);
+  const syncHosts = hosts.filter((h) => !rcloneHosts.has(h));
   const body = html`
 <div class="page-head">
   <h1>${name}</h1>
@@ -287,7 +284,7 @@ export function jobDetailPage(
     <div class="meta-strip">
       ${typeBadge(manifest.type)}
       <span class="chip">ruleset · ${manifest.ruleset}</span>
-      ${cloudBadge(manifest.cloud)}
+      ${cloudBadge(rcloneMembersOf(manifest.paths, rcloneHosts))}
     </div>
     <div id="host-state" hx-get="/ui/jobs/${name}/state" hx-trigger="load" hx-swap="innerHTML" class="fade-swap" style="margin-bottom:14px">
       <div class="state-strip">${hosts.map((h) => html`<span class="chip"><span class="led"></span><b>${h}</b> checking…</span>`)}</div>
@@ -313,7 +310,7 @@ export function jobDetailPage(
         <label class="check"><input type="checkbox" name="force"> Force divergent settings <span class="why">— overwrite live values with the manifest</span></label>
         <label class="check"><input type="checkbox" name="arm"> Arm real apply <span class="why">— required when dry run is off</span></label>
         <div class="actions" style="margin-top:12px">
-          <button class="btn btn-primary" type="submit">Apply to ${hosts.length} ${hosts.length === 1 ? "host" : "hosts"}</button>
+          <button class="btn btn-primary" type="submit">Apply to ${syncHosts.length} ${syncHosts.length === 1 ? "host" : "hosts"}</button>
         </div>
       </form>
       <div id="apply-out" class="fade-swap" style="margin-top:12px"></div>

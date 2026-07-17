@@ -10,18 +10,16 @@ paths:
   mac-studio:  /Users/eric/Code
   qnap-ts453d: /share/Sync/code
   win-desktop: 'C:\Users\eric\Code'
+  gdrive:      sync/code
 
-cloud:
-  rclone_remote: gdrive
-  remote_path: sync/code
-  bisync:
-    schedule: "*/15 * * * *"
-    flags:
-      - --resilient
-      - --recover
-      - --max-lock=2m
-      - --conflict-resolve=newer
-      - --compare=size,modtime,checksum
+bisync:
+  schedule: "*/15 * * * *"
+  flags:
+    - --resilient
+    - --recover
+    - --max-lock=2m
+    - --conflict-resolve=newer
+    - --compare=size,modtime,checksum
 
 versioning:
   type: staggered

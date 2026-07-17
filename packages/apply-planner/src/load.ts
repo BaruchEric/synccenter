@@ -24,17 +24,19 @@ function hostSchema(): ValidateFunction {
   return hostValidator;
 }
 
+export interface BisyncSettings {
+  anchor?: string;
+  schedule?: string;
+  flags?: string[];
+}
+
 export interface FolderManifest {
   name: string;
   ruleset: string;
   type: "send-receive" | "send-only" | "receive-only" | "receive-encrypted";
+  /** Per-member paths: local absolute path for syncthing members, remote path for rclone members. */
   paths: Record<string, string>;
-  cloud?: {
-    rclone_remote: string;
-    remote_path: string;
-    anchor?: string;
-    bisync?: { schedule?: string; flags?: string[] };
-  };
+  bisync?: BisyncSettings;
   conflict?: {
     policy: "newer" | "older" | "keep-both" | "require-resolve";
     surface_to_ui?: boolean;
@@ -45,15 +47,19 @@ export interface FolderManifest {
   };
   overrides?: Record<
     string,
-    Partial<Omit<FolderManifest, "name" | "ruleset" | "paths" | "cloud" | "conflict" | "overrides">>
+    Partial<
+      Omit<FolderManifest, "name" | "ruleset" | "paths" | "conflict" | "overrides" | "bisync">
+    > & { bisync?: Omit<BisyncSettings, "anchor"> }
   >;
   ignore_perms?: boolean;
   fs_watcher_enabled?: boolean;
   fs_watcher_delay_s?: number;
 }
 
-export interface HostManifest {
+/** A live P2P device in the Syncthing mesh. */
+export interface SyncthingHostManifest {
   name: string;
+  engine?: "syncthing";
   hostname: string;
   ip?: string;
   os: "macos" | "linux" | "windows" | "qnap";
@@ -68,6 +74,35 @@ export interface HostManifest {
     home_dir?: string;
   };
   rclone?: { rcd_url: string; auth_ref: string };
+}
+
+/** An rclone-backed mesh member (cloud storage, another NAS, ...) synced via scheduled bisync from the anchor. */
+export interface RcloneHostManifest {
+  name: string;
+  engine: "rclone";
+  /** rclone remote name as configured in rclone.conf on the anchor host. */
+  remote: string;
+}
+
+export type HostManifest = SyncthingHostManifest | RcloneHostManifest;
+
+export function isRcloneHost(h: HostManifest): h is RcloneHostManifest {
+  return h.engine === "rclone";
+}
+
+export function isSyncthingHost(h: HostManifest): h is SyncthingHostManifest {
+  return h.engine !== "rclone";
+}
+
+/** True when any member under the folder's paths is an engine: rclone host. */
+export function folderHasRcloneMember(
+  folder: Pick<FolderManifest, "paths">,
+  hosts: Record<string, HostManifest>,
+): boolean {
+  return Object.keys(folder.paths).some((h) => {
+    const host = hosts[h];
+    return host !== undefined && isRcloneHost(host);
+  });
 }
 
 export type FolderValidation =

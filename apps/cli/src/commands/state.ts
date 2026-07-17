@@ -6,7 +6,7 @@ import {
   type HostInfo,
   type ImportResult,
 } from "@synccenter/state-importer";
-import { loadAllHosts, createSecretsResolver } from "@synccenter/apply-planner";
+import { loadAllHosts, createSecretsResolver, isRcloneHost, isSyncthingHost } from "@synccenter/apply-planner";
 import { resolveScPaths, ScError } from "../lib/config.ts";
 import { emit, fail, type OutputCtx } from "../lib/output.ts";
 
@@ -52,6 +52,9 @@ export function registerStateCommand(program: Command): void {
         const m = all[name];
         if (!m) {
           fail(ctx, `unknown host: ${name}`, 2);
+        }
+        if (isRcloneHost(m!)) {
+          fail(ctx, `host ${name} is an rclone member — there is no live Syncthing state to import`, 2);
         }
         const secrets = createSecretsResolver({ configDir: paths.configDir });
         const target = hosts.find((h) => h.name === name);
@@ -101,11 +104,13 @@ export function registerStateCommand(program: Command): void {
 function buildHostInfo(configDir: string, hostsDir: string): HostInfo[] {
   const all = loadAllHosts(hostsDir);
   const secrets = createSecretsResolver({ configDir });
-  return Object.values(all).map((h) => ({
-    name: h.name,
-    apiUrl: h.syncthing.api_url,
-    apiKey: secrets.resolve(h.syncthing.api_key_ref),
-  }));
+  return Object.values(all)
+    .filter(isSyncthingHost)
+    .map((h) => ({
+      name: h.name,
+      apiUrl: h.syncthing.api_url,
+      apiKey: secrets.resolve(h.syncthing.api_key_ref),
+    }));
 }
 
 function reportResult(ctx: OutputCtx, r: ImportResult): void {

@@ -70,10 +70,10 @@ export function createFolder(cfg: ApiConfig, value: unknown): CreatedFolder {
     }
   }
 
-  const anchor = manifest.cloud?.anchor;
+  const anchor = manifest.bisync?.anchor;
   if (anchor && !Object.keys(manifest.paths).includes(anchor)) {
     throw new FolderServiceError(
-      `cloud.anchor '${anchor}' must be one of the folder's path hosts: ${Object.keys(manifest.paths).join(", ")}`,
+      `bisync.anchor '${anchor}' must be one of the folder's path hosts: ${Object.keys(manifest.paths).join(", ")}`,
       "UNKNOWN_HOST",
     );
   }

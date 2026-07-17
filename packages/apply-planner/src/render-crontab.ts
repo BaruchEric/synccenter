@@ -8,7 +8,7 @@ export function renderCrontab(plans: SchedulePlan[]): string {
     "",
   ];
   for (const p of plans) {
-    lines.push(`# ${p.folder} → ${p.anchor}`);
+    lines.push(`# ${p.folder}: ${p.anchor} ⇄ ${p.member}`);
     lines.push(`${p.cron} ${p.command}`);
   }
   return lines.join("\n") + "\n";

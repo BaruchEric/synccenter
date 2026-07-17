@@ -5,7 +5,7 @@ export const FOLDER_KEY_ORDER = [
   "ruleset",
   "type",
   "paths",
-  "cloud",
+  "bisync",
   "conflict",
   "versioning",
   "overrides",
@@ -16,6 +16,8 @@ export const FOLDER_KEY_ORDER = [
 
 export const HOST_KEY_ORDER = [
   "name",
+  "engine",
+  "remote",
   "hostname",
   "ip",
   "os",

@@ -78,6 +78,10 @@ beforeAll(async () => {
       ].join("\n"),
     );
   }
+  writeFileSync(
+    join(configDir, "hosts", "gdrive.yaml"),
+    ["name: gdrive", "engine: rclone", "remote: gdrive"].join("\n"),
+  );
 
   const cfg = loadConfig({
     SC_CONFIG_DIR: configDir,
@@ -331,14 +335,14 @@ describe("pickers", () => {
     expect(r.status).toBe(400);
   });
 
-  it("lists rclone remotes", async () => {
-    const body = await (await ui("/ui/frag/remotes")).text();
-    expect(body).toContain('value="gdrive"');
-    expect(body).toContain('value="b2"');
+  it("browses inside the remote for rclone members", async () => {
+    const body = await (await ui("/ui/frag/browse-host?host=gdrive&path=&pdl=pdl-0")).text();
+    expect(body).toContain('value="sync"');
+    expect(body).toContain('value="backup"');
   });
 
   it("completes remote paths, filtering on the typed fragment", async () => {
-    const body = await (await ui("/ui/frag/browse-remote?cloud_remote=gdrive&cloud_path=sync%2Fme")).text();
+    const body = await (await ui("/ui/frag/browse-host?host=gdrive&path=sync%2Fme&pdl=pdl-0")).text();
     expect(body).toContain('value="sync/media"');
     expect(body).not.toContain("docs");
   });
@@ -351,13 +355,13 @@ describe("pickers", () => {
       ["15 */6 * * *", "every 6 hours at :15"],
     ];
     for (const [expr, expected] of cases) {
-      const body = await (await ui("/ui/frag/cron-hint", form([["cloud_schedule", expr]]))).text();
+      const body = await (await ui("/ui/frag/cron-hint", form([["bisync_schedule", expr]]))).text();
       expect(body).toContain(expected);
     }
   });
 
   it("flags invalid cron expressions", async () => {
-    const body = await (await ui("/ui/frag/cron-hint", form([["cloud_schedule", "99 * * * *"]]))).text();
+    const body = await (await ui("/ui/frag/cron-hint", form([["bisync_schedule", "99 * * * *"]]))).text();
     expect(body).toContain("minute");
     expect(body).toContain("bad");
   });

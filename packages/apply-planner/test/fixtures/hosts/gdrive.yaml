@@ -1,0 +1,5 @@
+# An rclone-backed mesh member: Google Drive, reached via scheduled bisync
+# from the anchor host (the unique host with role: cloud-edge).
+name: gdrive
+engine: rclone
+remote: gdrive

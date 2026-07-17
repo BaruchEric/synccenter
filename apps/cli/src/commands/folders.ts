@@ -9,6 +9,7 @@ import {
   loadFolderManifest,
   loadAllHosts,
   createSecretsResolver,
+  isRcloneHost,
   type AdapterPool,
   type ApplyPlan,
   type SyncthingFolderConfig as PlannerFolderConfig,
@@ -179,6 +180,7 @@ async function buildAdapterPool(cmd: Command): Promise<AdapterPool> {
     syncthing: (h: string) => {
       const host = hosts[h];
       if (!host) throw new Error(`unknown host: ${h}`);
+      if (isRcloneHost(host)) throw new Error(`host ${h} is an rclone member, not a syncthing device`);
       return new SyncthingClient({
         baseUrl: host.syncthing.api_url,
         apiKey: secrets.resolve(host.syncthing.api_key_ref),
@@ -187,6 +189,7 @@ async function buildAdapterPool(cmd: Command): Promise<AdapterPool> {
     rclone: (h: string) => {
       const host = hosts[h];
       if (!host) throw new Error(`unknown host: ${h}`);
+      if (isRcloneHost(host)) throw new Error(`host ${h} is an rclone member; bisync runs on the anchor host`);
       if (!host.rclone) throw new Error(`host ${h} has no rclone block`);
       const auth = secrets.resolve(host.rclone.auth_ref);
       const colon = auth.indexOf(":");

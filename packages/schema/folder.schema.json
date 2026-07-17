@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://synccenter.beric.ca/schema/folder.json",
   "title": "Folder",
-  "description": "A synced folder: per-host paths, optional cloud bisync, versioning, watcher settings.",
+  "description": "A synced folder: per-member paths (Syncthing devices and rclone remotes), bisync settings, versioning, watcher settings.",
   "type": "object",
   "required": ["name", "ruleset", "type", "paths"],
   "additionalProperties": false,
@@ -24,41 +24,29 @@
     },
     "paths": {
       "type": "object",
-      "description": "Per-host absolute paths. Keys MUST match host names from hosts/.",
+      "description": "Per-member paths. Keys MUST match host names from hosts/. For engine: syncthing members the value is an absolute local path; for engine: rclone members it is the path inside the remote (e.g. sync/media-photos).",
       "minProperties": 1,
       "additionalProperties": { "type": "string", "minLength": 1 },
       "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" }
     },
-    "cloud": {
+    "bisync": {
       "type": "object",
-      "description": "Optional rclone bisync cloud edge.",
-      "required": ["rclone_remote", "remote_path"],
+      "description": "Defaults for the scheduled rclone bisync legs that connect engine: rclone members in paths to the anchor. Ignored when the folder has no rclone member.",
       "additionalProperties": false,
       "properties": {
-        "rclone_remote": {
-          "type": "string",
-          "description": "rclone remote name as configured in rclone.conf on the QNAP."
-        },
-        "remote_path": { "type": "string" },
         "anchor": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*$",
-          "description": "Optional host name override for the bisync anchor. Default: the unique host with role: cloud-edge."
+          "description": "Optional host name override for the bisync anchor. Default: the unique syncthing host with role: cloud-edge. Must appear in paths."
         },
-        "bisync": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "schedule": {
-              "type": "string",
-              "description": "Cron expression for the rclone bisync job."
-            },
-            "flags": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "Flags passed to `rclone bisync`. Defaults are recommended; override here."
-            }
-          }
+        "schedule": {
+          "type": "string",
+          "description": "Cron expression for the rclone bisync jobs. Per-member override: overrides.<member>.bisync.schedule."
+        },
+        "flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Flags passed to `rclone bisync`. Defaults are recommended; override here."
         }
       }
     },
@@ -96,7 +84,7 @@
     },
     "overrides": {
       "type": "object",
-      "description": "Per-host scalar overrides for fields that may legitimately differ per host (type, ignore_perms, fs_watcher_*, versioning).",
+      "description": "Per-member overrides. Syncthing members: fields that may legitimately differ per host (type, ignore_perms, fs_watcher_*, versioning). rclone members: bisync schedule/flags.",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
@@ -105,7 +93,15 @@
           "ignore_perms": { "type": "boolean" },
           "fs_watcher_enabled": { "type": "boolean" },
           "fs_watcher_delay_s": { "type": "integer", "minimum": 1, "maximum": 3600 },
-          "versioning": { "$ref": "#/properties/versioning" }
+          "versioning": { "$ref": "#/properties/versioning" },
+          "bisync": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "schedule": { "type": "string" },
+              "flags": { "type": "array", "items": { "type": "string" } }
+            }
+          }
         }
       },
       "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" }

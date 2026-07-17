@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { plan } from "../src/plan.ts";
-import { loadFolderManifest, loadAllHosts } from "../src/load.ts";
+import { loadFolderManifest, loadAllHosts, isSyncthingHost } from "../src/load.ts";
 
 const FIX = join(import.meta.dir, "fixtures");
 const GOLDEN_DIR = join(import.meta.dir, "golden");
@@ -63,12 +63,60 @@ describe("plan", () => {
     ).toThrow(/UNKNOWN_HOST/);
   });
 
-  it("throws PlanError(NO_CLOUD_EDGE_FOR_BISYNC) when no host has role: cloud-edge but folder has cloud:", () => {
+  it("throws PlanError(NO_CLOUD_EDGE_FOR_BISYNC) when a folder has rclone members but no host has role: cloud-edge", () => {
     const folder = loadFolderManifest(join(FIX, "folders/example-code-projects.yaml"));
     const hosts = loadAllHosts(join(FIX, "hosts"));
-    for (const h of Object.values(hosts)) h.role = "mesh-node";
+    for (const h of Object.values(hosts)) if (isSyncthingHost(h)) h.role = "mesh-node";
     expect(() =>
       plan({ folder, hosts, compiledIgnoreLines: [], filtersFile: "", secrets: fixedSecretsResolver(SECRETS) }),
     ).toThrow(/NO_CLOUD_EDGE_FOR_BISYNC/);
+  });
+
+  it("excludes rclone members from syncthing device lists and per-host ops", () => {
+    const folder = loadFolderManifest(join(FIX, "folders/example-code-projects.yaml"));
+    const hosts = loadAllHosts(join(FIX, "hosts"));
+    const result = plan({
+      folder,
+      hosts,
+      compiledIgnoreLines: [],
+      filtersFile: "/f",
+      secrets: fixedSecretsResolver(SECRETS),
+    });
+    expect(Object.keys(result.perHost).sort()).toEqual(["mac-studio", "qnap-ts453d", "win-desktop"]);
+    const addFolder = result.perHost["mac-studio"]!.find((op) => op.kind === "addFolder");
+    expect(addFolder && addFolder.kind === "addFolder" ? addFolder.folder.devices : []).toHaveLength(3);
+  });
+
+  it("throws PlanError(NO_SYNCTHING_MEMBER) when paths has only rclone members", () => {
+    const folder = loadFolderManifest(join(FIX, "folders/example-code-projects.yaml"));
+    const hosts = loadAllHosts(join(FIX, "hosts"));
+    const cloudOnly = { ...folder, paths: { gdrive: "sync/code" } };
+    expect(() =>
+      plan({ folder: cloudOnly, hosts, compiledIgnoreLines: [], filtersFile: "", secrets: fixedSecretsResolver(SECRETS) }),
+    ).toThrow(/NO_SYNCTHING_MEMBER/);
+  });
+
+  it("throws PlanError(ANCHOR_NOT_IN_PATHS) when the anchor has no path entry", () => {
+    const folder = loadFolderManifest(join(FIX, "folders/example-code-projects.yaml"));
+    const hosts = loadAllHosts(join(FIX, "hosts"));
+    const paths = { ...folder.paths };
+    delete paths["qnap-ts453d"];
+    expect(() =>
+      plan({ folder: { ...folder, paths }, hosts, compiledIgnoreLines: [], filtersFile: "", secrets: fixedSecretsResolver(SECRETS) }),
+    ).toThrow(/ANCHOR_NOT_IN_PATHS/);
+  });
+
+  it("throws PlanError(ANCHOR_NOT_SYNCTHING) when bisync.anchor names an rclone member", () => {
+    const folder = loadFolderManifest(join(FIX, "folders/example-code-projects.yaml"));
+    const hosts = loadAllHosts(join(FIX, "hosts"));
+    expect(() =>
+      plan({
+        folder: { ...folder, bisync: { ...folder.bisync, anchor: "gdrive" } },
+        hosts,
+        compiledIgnoreLines: [],
+        filtersFile: "",
+        secrets: fixedSecretsResolver(SECRETS),
+      }),
+    ).toThrow(/ANCHOR_NOT_SYNCTHING/);
   });
 });

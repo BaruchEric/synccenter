@@ -5,6 +5,12 @@ Versions group commits by phase; see `git log` for individual commits.
 
 ## [Unreleased]
 
+### Changed — BREAKING: cloud remotes are now mesh members
+- Folder manifests no longer have a `cloud:` block. A cloud remote (Google Drive, Dropbox, S3, another NAS — anything rclone speaks) is now a **host** with `engine: rclone` and a `remote:` name (`hosts/gdrive.yaml`), and joins a folder like any other member: a key under `paths:` whose value is the path inside the remote. Bisync scheduling moved to a folder-level `bisync:` block (`anchor`, `schedule`, `flags`), with per-member overrides under `overrides.<member>.bisync`. Migration: `cloud.rclone_remote`+`remote_path` → a `hosts/<name>.yaml` with `engine: rclone` + a `paths.<name>` entry; `cloud.anchor`/`cloud.bisync.*` → the `bisync:` block.
+- `host.schema.json` gained `engine: syncthing | rclone` (default syncthing). rclone hosts require only `name` + `remote`; syncthing hosts keep the previous required set.
+- Planner: syncthing ops are built across syncthing members only; each rclone member gets its own scheduled bisync leg against the anchor (the unique `role: cloud-edge` host, or `bisync.anchor`). New plan errors: `NO_SYNCTHING_MEMBER`, `ANCHOR_NOT_SYNCTHING`, `ANCHOR_NOT_IN_PATHS`. `SchedulePlan` gained a `member` field.
+- API: `POST /folders/:name/bisync` targets an rclone member (`?member=` when a folder has several); folder state/pause/resume skip rclone members. UI: the form's `cloud:` section became `bisync:`, rclone members are added as path rows (with remote-path completion via the same browse picker), and job pages badge each rclone member.
+
 ### Added
 - HTMX console at `/ui` on the API (no build step, htmx served from node_modules): sign-in via the API token (HttpOnly cookie scoped to `/ui`), sync-job list, a create form with live YAML manifest preview + inline name validation + plan preview, and a job detail page with plan, dry-run-default apply (arm checkbox required for real applies, prune/force affordances on 409), per-host live state, and apply history.
 - `POST /folders` JSON endpoint — validates against folder.schema.json + config-repo coherence (ruleset/hosts exist, name free) and writes canonical YAML via the state-importer emitter. 201/400/409 with coded errors.

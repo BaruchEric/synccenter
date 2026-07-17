@@ -7,6 +7,7 @@ import {
   createSecretsResolver,
   plan as buildPlan,
   renderCrontab,
+  folderHasRcloneMember,
 } from "@synccenter/apply-planner";
 import { compile } from "@synccenter/rule-compiler";
 import { resolveScPaths, ScError } from "../lib/config.ts";
@@ -23,7 +24,7 @@ export function registerScheduleCommand(program: Command): void {
   sch
     .command("render")
     .description(
-      "Render the cloud-edge crontab fragment for every folder with a cloud bisync",
+      "Render the anchor-host crontab fragment for every folder with rclone members",
     )
     .option("--out <path>", "write to a file instead of stdout")
     .action(async (opts: { out?: string }, cmd: Command) => {
@@ -43,7 +44,7 @@ export function registerScheduleCommand(program: Command): void {
         const allSchedule = [];
         for (const f of folderFiles) {
           const folder = loadFolderManifest(join(paths.foldersDir, f));
-          if (!folder.cloud) continue;
+          if (!folderHasRcloneMember(folder, hosts)) continue;
           const compiled = compile(
             join(paths.rulesDir, `${folder.ruleset}.yaml`),
             {

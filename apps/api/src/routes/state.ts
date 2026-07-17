@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { importFolder, importHost, importAll } from "@synccenter/state-importer";
-import { loadAllHosts, createSecretsResolver } from "@synccenter/apply-planner";
+import { loadAllHosts, createSecretsResolver, isRcloneHost } from "@synccenter/apply-planner";
 import type { ApiConfig } from "../config.ts";
 import { buildHostInfo } from "../lib/plan.ts";
 import { respondJsonError } from "../lib/errors.ts";
@@ -28,6 +28,15 @@ export function stateRouter(cfg: ApiConfig): Router {
       if (!m) {
         res.status(404).json({
           error: { code: "UNKNOWN_HOST", message: `no manifest for host: ${req.params.name}` },
+        });
+        return;
+      }
+      if (isRcloneHost(m)) {
+        res.status(400).json({
+          error: {
+            code: "NOT_SYNCTHING_HOST",
+            message: `host ${m.name} is an rclone member — there is no live Syncthing state to import`,
+          },
         });
         return;
       }

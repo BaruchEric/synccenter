@@ -2,15 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://synccenter.beric.ca/schema/host.json",
   "title": "Host",
-  "description": "A device participating in the Syncthing mesh (and optionally rclone).",
+  "description": "A member of the sync mesh. engine: syncthing (default) is a live P2P device; engine: rclone is a remote (cloud storage, another NAS, ...) reached via scheduled rclone bisync from the anchor host.",
   "type": "object",
-  "required": ["name", "hostname", "os", "role", "syncthing"],
+  "required": ["name"],
   "additionalProperties": false,
   "properties": {
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$",
       "description": "Stable logical name. Used as the key in folders/*.paths."
+    },
+    "engine": {
+      "type": "string",
+      "enum": ["syncthing", "rclone"],
+      "default": "syncthing",
+      "description": "What powers this member. syncthing = live mesh device; rclone = bisync'd remote."
+    },
+    "remote": {
+      "type": "string",
+      "description": "rclone remote name as configured in rclone.conf on the anchor host. Required (and only allowed) when engine: rclone."
     },
     "hostname": { "type": "string" },
     "ip": {
@@ -78,7 +88,7 @@
     },
     "rclone": {
       "type": "object",
-      "description": "Optional rclone rcd info — typically only on the QNAP cloud-edge host.",
+      "description": "Optional rclone rcd info — typically only on the cloud-edge (anchor) host.",
       "required": ["rcd_url", "auth_ref"],
       "additionalProperties": false,
       "properties": {
@@ -89,5 +99,29 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "engine": { "const": "rclone" } },
+        "required": ["engine"]
+      },
+      "then": {
+        "required": ["remote"],
+        "properties": {
+          "hostname": false,
+          "ip": false,
+          "os": false,
+          "role": false,
+          "ssh": false,
+          "syncthing": false,
+          "rclone": false
+        }
+      },
+      "else": {
+        "required": ["hostname", "os", "role", "syncthing"],
+        "properties": { "remote": false }
+      }
+    }
+  ]
 }

@@ -14,9 +14,20 @@ export function typeBadge(type: string): Raw {
   return html`<span class="badge">${type}</span>`;
 }
 
-export function cloudBadge(cloud: { rclone_remote: string; remote_path: string } | undefined): Raw | "" {
-  if (!cloud) return "";
-  return html`<span class="badge cloud">☁ ${cloud.rclone_remote}:${cloud.remote_path}</span>`;
+/** One badge per rclone member of the folder (host name + remote path). */
+export function cloudBadge(members: Array<{ host: string; path: string }>): Raw | "" {
+  if (members.length === 0) return "";
+  return html`${members.map((m) => html`<span class="badge cloud">☁ ${m.host}:${m.path}</span>`)}`;
+}
+
+/** The rclone members of a folder, in paths order. */
+export function rcloneMembersOf(
+  paths: Record<string, string>,
+  rcloneHosts: ReadonlySet<string>,
+): Array<{ host: string; path: string }> {
+  return Object.entries(paths)
+    .filter(([host]) => rcloneHosts.has(host))
+    .map(([host, path]) => ({ host, path }));
 }
 
 export function hostChip(name: string): Raw {
@@ -198,6 +209,8 @@ export interface HostFolderState {
   state?: string;
   needBytes?: number;
   error?: string;
+  /** rclone members have no live Syncthing state — rendered as a bisync chip. */
+  rclone?: boolean;
 }
 
 const STATE_LED: Record<string, string> = {
@@ -211,6 +224,9 @@ const STATE_LED: Record<string, string> = {
 
 export function hostStateStrip(states: HostFolderState[]): Raw {
   return html`<div class="state-strip">${states.map((s) => {
+    if (s.rclone) {
+      return html`<span class="chip"><span class="led info"></span><b>☁ ${s.host}</b> bisync member</span>`;
+    }
     if (!s.ok) {
       return html`<span class="chip" title="${s.error ?? ""}"><span class="led err"></span><b>${s.host}</b> unreachable</span>`;
     }

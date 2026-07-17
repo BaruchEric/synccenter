@@ -42,8 +42,13 @@ function looksAbsolute(p: string): boolean {
 /**
  * Build a FolderManifest from the job form. Never throws — collects errors so
  * the preview pane can render the partial YAML alongside what needs fixing.
+ * `rcloneHosts` names the engine: rclone hosts — their path rows hold remote
+ * paths, not local ones.
  */
-export function parseJobForm(body: FormBody): ParsedJobForm {
+export function parseJobForm(
+  body: FormBody,
+  rcloneHosts: ReadonlySet<string> = new Set(),
+): ParsedJobForm {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -83,6 +88,13 @@ export function parseJobForm(body: FormBody): ParsedJobForm {
     }
     if (seen.has(host)) {
       errors.push(`Host '${host}' appears twice — one path per host.`);
+      continue;
+    }
+    if (rcloneHosts.has(host)) {
+      // The row is a remote path inside the member's rclone remote.
+      seen.add(host);
+      pathMap[host] = path;
+      if (htype) errors.push(`'${host}' is an rclone member — it doesn't take a Syncthing type override.`);
       continue;
     }
     if (!looksAbsolute(path)) {
@@ -159,37 +171,34 @@ export function parseJobForm(body: FormBody): ParsedJobForm {
     }
   }
 
-  // cloud: — active when remote or path is filled in.
-  // Accept the CLI spelling "gdrive:"; the colon is the fs separator, not part
-  // of the remote name, so it must not be stored in the manifest.
-  const remote = one(body, "cloud_remote").replace(/:+$/, "");
-  const remotePath = one(body, "cloud_path");
-  const anchor = one(body, "cloud_anchor");
-  const schedule = one(body, "cloud_schedule");
-  const flagsRaw = one(body, "cloud_flags");
-  if (remote || remotePath) {
-    if (!remote) errors.push("Cloud edge: the rclone remote name is required (as configured in rclone.conf).");
-    if (!remotePath) errors.push("Cloud edge: the remote path is required.");
-    if (remote && remotePath) {
-      const cloud: NonNullable<FolderManifest["cloud"]> = { rclone_remote: remote, remote_path: remotePath };
-      if (anchor) cloud.anchor = anchor;
-      const bisync: { schedule?: string; flags?: string[] } = {};
-      if (schedule) {
-        bisync.schedule = schedule;
-        if (schedule.split(/\s+/).length !== 5) {
-          warnings.push(`Bisync schedule '${schedule}' doesn't look like a 5-field cron expression.`);
-        }
-      }
-      const flags = flagsRaw
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
-      if (flags.length > 0) bisync.flags = flags;
-      if (bisync.schedule || bisync.flags) cloud.bisync = bisync;
-      manifest.cloud = cloud;
+  // bisync: — schedule/flags/anchor for the rclone members listed under paths.
+  const anchor = one(body, "bisync_anchor");
+  const schedule = one(body, "bisync_schedule");
+  const flagsRaw = one(body, "bisync_flags");
+  const rcloneMembers = Object.keys(pathMap).filter((h) => rcloneHosts.has(h));
+  if (anchor || schedule || flagsRaw) {
+    if (rcloneMembers.length === 0) {
+      warnings.push("Bisync settings only take effect once an rclone member (e.g. gdrive) is added under paths.");
     }
-  } else if (anchor || schedule || flagsRaw) {
-    warnings.push("Cloud edge settings are ignored until a remote and remote path are filled in.");
+    if (anchor && rcloneHosts.has(anchor)) {
+      errors.push(`Anchor '${anchor}' is an rclone member — the anchor must be a Syncthing host.`);
+    }
+    const bisync: NonNullable<FolderManifest["bisync"]> = {};
+    if (anchor && !rcloneHosts.has(anchor)) bisync.anchor = anchor;
+    if (schedule) {
+      bisync.schedule = schedule;
+      if (schedule.split(/\s+/).length !== 5) {
+        warnings.push(`Bisync schedule '${schedule}' doesn't look like a 5-field cron expression.`);
+      }
+    }
+    const flags = flagsRaw
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    if (flags.length > 0) bisync.flags = flags;
+    if (Object.keys(bisync).length > 0) manifest.bisync = bisync;
+  } else if (rcloneMembers.length > 0) {
+    warnings.push(`Members ${rcloneMembers.join(", ")} won't bisync until a schedule is set (see the bisync section).`);
   }
 
   return { manifest, errors, warnings };

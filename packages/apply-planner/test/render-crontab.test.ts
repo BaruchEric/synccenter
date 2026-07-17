@@ -10,6 +10,7 @@ describe("renderCrontab", () => {
   it("renders a single bisync schedule into a stable crontab fragment", () => {
     const plans: SchedulePlan[] = [{
       anchor: "qnap-ts453d",
+      member: "gdrive",
       folder: "example-code-projects",
       cron: "*/15 * * * *",
       filtersFile: "/share/synccenter-config/compiled/dev-monorepo/filter.rclone",

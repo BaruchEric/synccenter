@@ -158,9 +158,7 @@ beforeAll(async () => {
       "paths:",
       "  mac-studio: /Users/eric/Sync/shared",
       "  qnap-ts453d: /share/Sync/shared",
-      "cloud:",
-      "  rclone_remote: gdrive",
-      "  remote_path: sync/shared",
+      "  gdrive: sync/shared",
     ].join("\n"),
   );
   writeFileSync(
@@ -172,6 +170,10 @@ beforeAll(async () => {
       "paths:",
       "  mac-studio: /Users/eric/Sync/local",
     ].join("\n"),
+  );
+  writeFileSync(
+    join(configDir, "hosts", "gdrive.yaml"),
+    ["name: gdrive", "engine: rclone", "remote: gdrive"].join("\n"),
   );
   writeFileSync(
     join(configDir, "hosts", "mac-studio.yaml"),
@@ -309,7 +311,7 @@ describe("config-repo reads", () => {
 
   it("GET /hosts", async () => {
     const r = await call("/hosts");
-    expect(await r.json()).toEqual({ hosts: ["mac-studio", "qnap-ts453d"] });
+    expect(await r.json()).toEqual({ hosts: ["gdrive", "mac-studio", "qnap-ts453d"] });
   });
 
   it("POST /rules/:name/compile returns stignore + filter", async () => {
@@ -457,11 +459,11 @@ describe("folder bisync", () => {
     expect(r.status).toBe(404);
   });
 
-  it("400s when the folder has no cloud edge", async () => {
+  it("400s when the folder has no rclone member", async () => {
     const r = await call("/folders/no-cloud/bisync", { method: "POST" });
     expect(r.status).toBe(400);
     expect((await r.json()) as { error: string }).toMatchObject({
-      error: expect.stringContaining("no cloud edge"),
+      error: expect.stringContaining("no rclone member"),
     });
   });
 
