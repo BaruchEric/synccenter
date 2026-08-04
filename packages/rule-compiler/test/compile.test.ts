@@ -46,7 +46,7 @@ describe("compile()", () => {
     expect(body[body.length - 1]).toBe("+ **");
   });
 
-  it("resolves ruleset:// + github:// imports in order, then own patterns, then includes", () => {
+  it("emits .stignore reversed (first-match-wins): includes, then own patterns, then imports", () => {
     const r = compileFixture("dev-monorepo");
     const stLines = r.stignore.split("\n");
     const idxBase = stLines.indexOf(".DS_Store"); // from ruleset://base-binaries
@@ -54,10 +54,12 @@ describe("compile()", () => {
     const idxOwnEnv = stLines.indexOf("**/.env"); // from this ruleset
     const idxNegEnvExample = stLines.indexOf("!**/.env.example"); // includes:
 
-    expect(idxBase).toBeGreaterThan(-1);
-    expect(idxNodeModules).toBeGreaterThan(idxBase);
-    expect(idxOwnEnv).toBeGreaterThan(idxNodeModules);
-    expect(idxNegEnvExample).toBeGreaterThan(idxOwnEnv);
+    // Syncthing takes the FIRST matching pattern, so the resolution order is
+    // reversed on emit — the negation must precede the exclude it carves out.
+    expect(idxNegEnvExample).toBeGreaterThan(-1);
+    expect(idxOwnEnv).toBeGreaterThan(idxNegEnvExample);
+    expect(idxNodeModules).toBeGreaterThan(idxOwnEnv);
+    expect(idxBase).toBeGreaterThan(idxNodeModules);
 
     // Strips comments and blank lines from imported gitignore files
     expect(r.stignore).not.toContain("# Logs");

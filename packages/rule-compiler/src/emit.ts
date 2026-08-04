@@ -1,5 +1,9 @@
 export function emitStignore(patterns: string[], engineExtra: string[], header: string): string {
-  const body = [...patterns, ...engineExtra];
+  // Syncthing is FIRST-match-wins (like rclone), while the unified pattern
+  // list uses gitignore's last-match-wins — reverse so negations that follow
+  // a broader exclude (e.g. `!.env.example` after `.env*`) actually fire.
+  const body = [...patterns].reverse();
+  for (const x of engineExtra) body.push(x);
   return `${[header, "", ...body].join("\n")}\n`;
 }
 

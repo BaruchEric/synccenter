@@ -35,7 +35,9 @@ export function buildSchedulePlan(
 
   const cmd = [
     "docker", "exec", "rclone-rcd",
-    "rclone", "bisync",
+    // The rcd daemon gets --config on its own command line; a plain `docker
+    // exec rclone` does not inherit it, so spell it out here too.
+    "rclone", "--config=/config/rclone.conf", "bisync",
     localPath,
     remotePath,
     `--filters-file=${filtersFile}`,
