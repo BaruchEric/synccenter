@@ -49,6 +49,8 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 export const api = {
   get: <T>(path: string) => send<T>("GET", path),
   post: <T>(path: string, body?: unknown) => send<T>("POST", path, body),
+  put: <T>(path: string, body?: unknown) => send<T>("PUT", path, body),
+  del: <T>(path: string, body?: unknown) => send<T>("DELETE", path, body),
 };
 
 // Typed shapes (a subset; expand as needed).
@@ -56,6 +58,79 @@ export interface Health { ok: boolean; version: string }
 export interface FoldersList { folders: string[] }
 export interface RulesList { rules: string[] }
 export interface HostsList { hosts: string[] }
+export interface ApplyHistory {
+  history: Array<{
+    id: number;
+    ts: string;
+    actor: string;
+    source: "api" | "cli" | "ui" | "mcp";
+    target_kind: string;
+    target_name: string;
+    result: "ok" | "error" | "dry-run";
+    note: string | null;
+  }>;
+}
+export interface ScheduleList {
+  jobs: Array<{
+    folder: string;
+    anchor: string;
+    member: string;
+    cron: string;
+    command: string;
+    filtersFile: string;
+  }>;
+}
+/** What a bisync is doing right now, as served by /runs and pushed over /events. */
+export type RunPhase = "starting" | "checking" | "transferring" | "finished";
+export interface RunView {
+  id: number;
+  folder: string;
+  member: string | null;
+  jobid: number | null;
+  started_at: string;
+  finished_at: string | null;
+  state: "running" | "done" | "failed" | "stopped";
+  phase: RunPhase;
+  /** 0–1, or null while bisync is still listing and has no denominator. */
+  fraction: number | null;
+  bytes: number;
+  total_bytes: number;
+  transfers: number;
+  checks: number;
+  listed: number;
+  errors: number;
+  speed: number;
+  eta: number | null;
+  current: string | null;
+  error: string | null;
+  actor: string;
+  source: string;
+  dry_run: number;
+  resync: number;
+}
+export interface RunsList {
+  runs: RunView[];
+  activeCount: number;
+}
+/** A folder manifest as stored in synccenter-config/folders/<name>.yaml. */
+export interface FolderManifest {
+  name: string;
+  ruleset: string;
+  /** Absent means enabled; false parks the folder. */
+  enabled?: boolean;
+  type: string;
+  paths: Record<string, string>;
+  bisync?: { schedule?: string; anchor?: string; flags?: string[] };
+  [key: string]: unknown;
+}
+/** A host manifest as stored in synccenter-config/hosts/<name>.yaml. */
+export interface HostManifest {
+  name: string;
+  engine?: "syncthing" | "rclone";
+  remote?: string;
+  os?: string;
+  role?: string;
+}
 export interface ConflictsList { conflicts: Array<{ id: number; folder: string; path: string; detected_at: string }> }
 export interface FolderState {
   folder: string;

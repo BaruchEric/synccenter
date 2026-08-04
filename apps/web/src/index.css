@@ -8,3 +8,57 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+@layer components {
+  /* The two moving parts in the whole app, both of them status indicators:
+     a lamp that says the feed is alive, and a travelling segment on the
+     timeline spine for work whose size isn't known yet. Everything else holds
+     still — on an instrument panel, motion should mean something. */
+  @keyframes sc-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
+  }
+  .sc-pulse {
+    animation: sc-pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes sc-scan {
+    0% {
+      transform: translateY(-120%);
+    }
+    100% {
+      transform: translateY(520%);
+    }
+  }
+  .sc-scan {
+    animation: sc-scan 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sc-pulse,
+    .sc-scan {
+      animation: none;
+    }
+    .sc-scan {
+      opacity: 0.45;
+    }
+  }
+
+  /* Bytes climb about once a second; without a transition the meter
+     staircases, with too long a one it lies about where it is.
+     scaleY from a top origin rather than height: identical on screen, but it
+     stays on the compositor instead of laying out every frame. */
+  .sc-meter-fill {
+    transition: transform 900ms linear;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sc-meter-fill {
+      transition: none;
+    }
+  }
+}
