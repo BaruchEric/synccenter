@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RcloneClient, RcloneError, SyncthingClient, SyncthingError } from "@synccenter/adapters";
-import { buildApp } from "../src/app.ts";
+import { buildApp, type BuiltApp } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { HostRegistry } from "../src/registry.ts";
 
@@ -95,6 +95,13 @@ class FakeRclone {
     if (this.shouldFail()) throw this.popFail();
     return { remotes: ["gdrive", "b2"] };
   }
+  /** Overridable so a test can hold a job open, finish it, or fail it. */
+  public nextJobStatus: { finished: boolean; success?: boolean; error?: string } = {
+    finished: true,
+    success: true,
+  };
+  public nextStats: Record<string, unknown> = { bytes: 0, checks: 0, elapsedTime: 0, errors: 0 };
+
   async jobStatus(jobid: number) {
     this.calls.push({ method: "jobStatus", args: [jobid] });
     if (this.shouldFail()) throw this.popFail();
@@ -102,14 +109,17 @@ class FakeRclone {
       id: jobid,
       startTime: "2026-05-14T00:00:00Z",
       duration: 1,
-      finished: true,
-      success: true,
+      ...this.nextJobStatus,
     };
   }
   async getStats(group?: string) {
     this.calls.push({ method: "getStats", args: [group] });
     if (this.shouldFail()) throw this.popFail();
-    return { bytes: 0, checks: 0, elapsedTime: 0, errors: 0 };
+    return this.nextStats;
+  }
+  async stopJob(jobid: number) {
+    this.calls.push({ method: "stopJob", args: [jobid] });
+    if (this.shouldFail()) throw this.popFail();
   }
   async bisync(params: unknown) {
     this.calls.push({ method: "bisync", args: [params] });
@@ -134,6 +144,8 @@ let baseUrl: string;
 let macFake: FakeSyncthing;
 let qnapFake: FakeSyncthing;
 let rcloneFake: FakeRclone;
+let tracker: BuiltApp["tracker"];
+let bus: BuiltApp["bus"];
 
 beforeAll(async () => {
   tmpRoot = mkdtempSync(join(tmpdir(), "synccenter-api-"));
@@ -232,12 +244,17 @@ beforeAll(async () => {
     return new Response("not found", { status: 404 });
   }) as unknown as typeof fetch;
 
-  const { app } = buildApp({
+  const built = buildApp({
     cfg,
     registry,
     rclone: rcloneFake as unknown as RcloneClient,
     importerFetch,
   });
+  const app = built.app;
+  // buildApp deliberately leaves the poller stopped; drive it by hand so the
+  // suite never depends on (or is held open by) a live interval.
+  tracker = built.tracker;
+  bus = built.bus;
 
   server = await new Promise<Server>((resolve) => {
     const s = app.listen(0, () => resolve(s));
@@ -259,6 +276,8 @@ beforeEach(() => {
   rcloneFake.calls.length = 0;
   rcloneFake.failNext = null;
   rcloneFake.nextBisyncResult = { jobid: 7 };
+  rcloneFake.nextJobStatus = { finished: true, success: true };
+  rcloneFake.nextStats = { bytes: 0, checks: 0, elapsedTime: 0, errors: 0 };
 });
 
 async function call(path: string, init: RequestInit = {}, withAuth = true): Promise<Response> {
@@ -409,6 +428,73 @@ describe("apply", () => {
   });
 });
 
+describe("folder CRUD: update / disable / delete", () => {
+  const json = (body: unknown): RequestInit => ({
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  // Operate on a folder this block owns. Mutating the shared fixtures would
+  // leak into every test that runs after it.
+  const SCRATCH = "crud-scratch";
+  const base = { ruleset: "base-binaries", type: "send-receive", paths: { "mac-studio": "/tmp/crud" } };
+
+  beforeEach(async () => {
+    await call(`/folders/${SCRATCH}`, { method: "DELETE", ...json({ confirm: true }) });
+    await call("/folders", { method: "POST", ...json({ name: SCRATCH, ...base }) });
+  });
+  afterAll(async () => {
+    await call(`/folders/${SCRATCH}`, { method: "DELETE", ...json({ confirm: true }) });
+  });
+
+  it("PUT replaces a manifest in place", async () => {
+    const r = await call(`/folders/${SCRATCH}`, {
+      method: "PUT",
+      ...json({ ...base, type: "send-only" }),
+    });
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { folder: { type: string } }).folder.type).toBe("send-only");
+    expect(((await (await call(`/folders/${SCRATCH}`)).json()) as { type: string }).type).toBe("send-only");
+  });
+
+  it("PUT refuses a rename — that would orphan compiled artifacts and the folder ID", async () => {
+    const r = await call(`/folders/${SCRATCH}`, { method: "PUT", ...json({ name: "renamed", ...base }) });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: { message: string } }).error.message).toContain("cannot rename");
+  });
+
+  it("PUT on a folder that does not exist is 404, not a silent create", async () => {
+    const r = await call("/folders/ghost", { method: "PUT", ...json(base) });
+    expect(r.status).toBe(404);
+  });
+
+  it("disable writes enabled:false; enable removes the key again", async () => {
+    expect((await call(`/folders/${SCRATCH}/disable`, { method: "POST" })).status).toBe(200);
+    expect(((await (await call(`/folders/${SCRATCH}`)).json()) as { enabled?: boolean }).enabled).toBe(false);
+
+    expect((await call(`/folders/${SCRATCH}/enable`, { method: "POST" })).status).toBe(200);
+    // Enabled is the default, so the key should be gone rather than `true`.
+    expect(((await (await call(`/folders/${SCRATCH}`)).json()) as { enabled?: boolean }).enabled).toBeUndefined();
+  });
+
+  it("a disabled folder refuses apply", async () => {
+    await call(`/folders/${SCRATCH}/disable`, { method: "POST" });
+    const r = await call(`/folders/${SCRATCH}/apply`, { method: "POST", ...json({ confirm: true, dryRun: true }) });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: { message: string } }).error.message).toContain("disabled");
+  });
+
+  it("DELETE needs confirm:true, then removes only the manifest", async () => {
+    const guard = await call(`/folders/${SCRATCH}`, { method: "DELETE" });
+    expect(guard.status).toBe(400);
+    expect(((await guard.json()) as { error: { code: string } }).error.code).toBe("CONFIRM_REQUIRED");
+
+    expect((await call(`/folders/${SCRATCH}`, { method: "DELETE", ...json({ confirm: true }) })).status).toBe(200);
+    const listed = (await (await call("/folders")).json()) as { folders: string[] };
+    expect(listed.folders).not.toContain(SCRATCH);
+    expect((await call(`/folders/${SCRATCH}`, { method: "DELETE", ...json({ confirm: true }) })).status).toBe(404);
+  });
+});
+
 describe("legacy / stubbed", () => {
   it("POST /apply (no folder name) is still 501", async () => {
     const r = await call("/apply", { method: "POST" });
@@ -476,10 +562,11 @@ describe("folder bisync", () => {
   });
 
   it("triggers a bisync with the right path1/path2/filtersFile once compiled", async () => {
-    // Materialize compiled/<folder>/filter.rclone on disk — the bisync route
-    // expects the rule-compiler output to already exist there.
-    mkdirSync(join(configDir, "compiled", "shared"), { recursive: true });
-    writeFileSync(join(configDir, "compiled", "shared", "filter.rclone"), "- .DS_Store\n+ **\n");
+    // Compilation is per-RULESET, so the artifact lives under the ruleset name
+    // (`base-binaries`), not the folder name. Keying this off the folder is the
+    // bug that made every Run 409 with "filter.rclone missing".
+    mkdirSync(join(configDir, "compiled", "base-binaries"), { recursive: true });
+    writeFileSync(join(configDir, "compiled", "base-binaries", "filter.rclone"), "- .DS_Store\n+ **\n");
 
     rcloneFake.calls.length = 0;
     const r = await call("/folders/shared/bisync?async=true&dryRun=true", { method: "POST" });
@@ -492,7 +579,7 @@ describe("folder bisync", () => {
 
     const bisyncCall = rcloneFake.calls.find((c) => c.method === "bisync")!;
     const args = bisyncCall.args[0] as { filtersFile: string; async: boolean; dryRun: boolean };
-    expect(args.filtersFile).toBe(join(configDir, "compiled", "shared", "filter.rclone"));
+    expect(args.filtersFile).toBe(join(configDir, "compiled", "base-binaries", "filter.rclone"));
     expect(args.async).toBe(true);
     expect(args.dryRun).toBe(true);
   });
@@ -562,5 +649,392 @@ describe("imports routes", () => {
     const body = (await r.json()) as { stignore: string };
     expect(body.stignore).toContain("node_modules/");
     expect(body.stignore).toContain("**/dist/");
+  });
+});
+
+describe("run tracking + live progress", () => {
+  /** The bisync route only registers a run once the filter exists. */
+  const armFilter = () => {
+    mkdirSync(join(configDir, "compiled", "base-binaries"), { recursive: true });
+    writeFileSync(join(configDir, "compiled", "base-binaries", "filter.rclone"), "+ **\n");
+  };
+
+  // Runs are server state that outlives a test. Settle whatever a previous one
+  // left in flight, or the next tick finishes them all at once and every
+  // history assertion counts somebody else's rows.
+  beforeEach(async () => {
+    rcloneFake.nextJobStatus = { finished: true, success: true };
+    await tracker.tick();
+    rcloneFake.calls.length = 0;
+  });
+
+  it("names a stats group and hands it to rclone", async () => {
+    armFilter();
+    const r = await call("/folders/shared/bisync?async=true", { method: "POST" });
+    expect(r.status).toBe(200);
+    const args = rcloneFake.calls.find((c) => c.method === "bisync")!.args[0] as {
+      statsGroup: string;
+    };
+    // Guessing rclone's `job/<id>` group yields all zeros for bisync, so the
+    // group has to be one we chose and can look up later.
+    expect(args.statsGroup).toMatch(/^sc\/bisync\/shared\//);
+  });
+
+  it("registers a run and holds off on history until the job ends", async () => {
+    armFilter();
+    const before = ((await (await call("/apply-history")).json()) as { history: unknown[] }).history
+      .length;
+
+    rcloneFake.nextJobStatus = { finished: false };
+    const started = (await (
+      await call("/folders/shared/bisync?async=true", { method: "POST" })
+    ).json()) as { runId: number };
+    expect(started.runId).toBeGreaterThan(0);
+
+    const running = (await (await call(`/runs/${started.runId}`)).json()) as {
+      run: { state: string; phase: string };
+    };
+    expect(running.run.state).toBe("running");
+
+    // A run in flight must not already be sitting in history as a finished
+    // event — the timeline would show it both ways at once.
+    const mid = ((await (await call("/apply-history")).json()) as { history: unknown[] }).history;
+    expect(mid.length).toBe(before);
+  });
+
+  it("moves starting → checking → transferring as the stats fill in", async () => {
+    armFilter();
+    rcloneFake.nextJobStatus = { finished: false };
+    const { runId } = (await (
+      await call("/folders/shared/bisync?async=true", { method: "POST" })
+    ).json()) as { runId: number };
+
+    const phase = async () =>
+      ((await (await call(`/runs/${runId}`)).json()) as { run: { phase: string } }).run.phase;
+
+    expect(await phase()).toBe("starting");
+
+    // Listing: bisync walks both trees before moving a byte, so there is no
+    // denominator yet. Reporting that as 0% would read as stalled.
+    rcloneFake.nextStats = { bytes: 0, totalBytes: 0, checks: 1200, listed: 1500, errors: 0 };
+    await tracker.tick();
+    expect(await phase()).toBe("checking");
+
+    rcloneFake.nextStats = { bytes: 500, totalBytes: 1000, checks: 1800, errors: 0, speed: 250 };
+    await tracker.tick();
+    const t = (await (await call(`/runs/${runId}`)).json()) as {
+      run: { phase: string; fraction: number; bytes: number };
+    };
+    expect(t.run.phase).toBe("transferring");
+    expect(t.run.fraction).toBe(0.5);
+    expect(t.run.bytes).toBe(500);
+  });
+
+  it("writes exactly one history row, with the real result, when the job ends", async () => {
+    armFilter();
+    rcloneFake.nextJobStatus = { finished: false };
+    const { runId } = (await (
+      await call("/folders/shared/bisync?async=true", { method: "POST" })
+    ).json()) as { runId: number };
+
+    const before = ((await (await call("/apply-history")).json()) as { history: unknown[] }).history
+      .length;
+
+    rcloneFake.nextStats = { bytes: 4096, totalBytes: 4096, checks: 9, errors: 0 };
+    rcloneFake.nextJobStatus = { finished: true, success: true };
+    await tracker.tick();
+
+    const done = (await (await call(`/runs/${runId}`)).json()) as {
+      run: { state: string; phase: string; finished_at: string };
+    };
+    expect(done.run.state).toBe("done");
+    expect(done.run.phase).toBe("finished");
+    expect(done.run.finished_at).toBeTruthy();
+
+    const after = ((await (await call("/apply-history")).json()) as {
+      history: Array<{ result: string; target_name: string; note: string }>;
+    }).history;
+    expect(after.length).toBe(before + 1);
+    expect(after[0]!.result).toBe("ok");
+    expect(after[0]!.target_name).toBe("shared");
+    expect(after[0]!.note).toContain("bisync");
+
+    // And a settled run must not be polled again.
+    rcloneFake.calls.length = 0;
+    await tracker.tick();
+    expect(rcloneFake.calls.filter((c) => c.method === "jobStatus")).toHaveLength(0);
+  });
+
+  it("marks the run failed when rclone reports an error", async () => {
+    armFilter();
+    rcloneFake.nextJobStatus = { finished: false };
+    const { runId } = (await (
+      await call("/folders/shared/bisync?async=true", { method: "POST" })
+    ).json()) as { runId: number };
+
+    rcloneFake.nextJobStatus = { finished: true, success: false, error: "path1 lock held" };
+    await tracker.tick();
+
+    const r = (await (await call(`/runs/${runId}`)).json()) as {
+      run: { state: string; error: string };
+    };
+    expect(r.run.state).toBe("failed");
+    expect(r.run.error).toBe("path1 lock held");
+  });
+
+  it("stops a running job on request and refuses to stop a settled one", async () => {
+    armFilter();
+    rcloneFake.nextJobStatus = { finished: false };
+    const { runId } = (await (
+      await call("/folders/shared/bisync?async=true", { method: "POST" })
+    ).json()) as { runId: number };
+
+    const stopped = await call(`/runs/${runId}/stop`, { method: "POST" });
+    expect(stopped.status).toBe(200);
+    expect(rcloneFake.calls.some((c) => c.method === "stopJob")).toBe(true);
+    expect(((await stopped.json()) as { run: { state: string } }).run.state).toBe("stopped");
+
+    const again = await call(`/runs/${runId}/stop`, { method: "POST" });
+    expect(again.status).toBe(409);
+  });
+
+  it("404s for an unknown run", async () => {
+    expect((await call("/runs/999999")).status).toBe(404);
+    expect((await call("/runs/999999/stop", { method: "POST" })).status).toBe(404);
+  });
+
+  it("lists runs newest first", async () => {
+    armFilter();
+    rcloneFake.nextJobStatus = { finished: false };
+    await call("/folders/shared/bisync?async=true", { method: "POST" });
+    const body = (await (await call("/runs?limit=5")).json()) as {
+      runs: Array<{ id: number }>;
+      activeCount: number;
+    };
+    expect(body.runs.length).toBeGreaterThan(0);
+    expect(body.runs[0]!.id).toBeGreaterThan(body.runs[body.runs.length - 1]!.id - 1);
+    expect(body.activeCount).toBeGreaterThan(0);
+  });
+});
+
+describe("event stream", () => {
+  it("opens with the current runs and pushes what changes after", async () => {
+    const ctrl = new AbortController();
+    const res = await call("/events", { signal: ctrl.signal });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    // Buffering proxies are the usual reason a stream arrives in bursts.
+    expect(res.headers.get("cache-control")).toContain("no-transform");
+    expect(res.headers.get("x-accel-buffering")).toBe("no");
+
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    const frames: string[] = [];
+    const pump = (async () => {
+      let buf = "";
+      while (frames.length < 2) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buf += dec.decode(value, { stream: true });
+        let i: number;
+        while ((i = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          if (frame.includes("data:")) frames.push(frame);
+        }
+      }
+    })();
+
+    // Give the hello frame a moment, then cause a change.
+    await Bun.sleep(50);
+    bus.emit({ type: "folder", folder: "shared", action: "applied" });
+    await pump;
+    ctrl.abort();
+
+    expect(frames[0]).toContain("event: hello");
+    expect(frames[1]).toContain("event: folder");
+    expect(frames[1]).toContain('"action":"applied"');
+  });
+
+  it("requires a token like every other route", async () => {
+    expect((await call("/events", {}, false)).status).toBe(401);
+  });
+});
+
+describe("manifest writes preserve the file", () => {
+  const COMMENTED = [
+    "# Why this folder exists at all.",
+    "name: commented",
+    "ruleset: base-binaries",
+    "type: send-receive",
+    "",
+    "paths:",
+    "  # The Mac is the one people actually type on.",
+    "  mac-studio: /Users/eric/Sync/commented",
+    "",
+    "bisync:",
+    "  schedule: \"0 4 * * *\"",
+    "  flags:",
+    "    # Second-precision modtimes on one side, milliseconds on the other.",
+    "    - --modify-window=1s",
+    "overrides:",
+    "  mac-studio:",
+    "    ignore_perms: false",
+    "ignore_perms: true",
+    "",
+  ].join("\n");
+
+  const file = () => join(configDir, "folders", "commented.yaml");
+  beforeEach(() => writeFileSync(file(), COMMENTED));
+
+  it("keeps every comment when disabling and re-enabling", async () => {
+    expect((await call("/folders/commented/disable", { method: "POST" })).status).toBe(200);
+    const off = readFileSync(file(), "utf8");
+    expect(off).toContain("# Why this folder exists at all.");
+    expect(off).toContain("# Second-precision modtimes");
+    expect(off).toContain("enabled: false");
+
+    expect((await call("/folders/commented/enable", { method: "POST" })).status).toBe(200);
+    const on = readFileSync(file(), "utf8");
+    expect(on).not.toContain("enabled:");
+    expect(on).toContain("# The Mac is the one people actually type on.");
+  });
+
+  it("leaves every other key alone across a disable/enable cycle", async () => {
+    const before = readFileSync(file(), "utf8");
+    await call("/folders/commented/disable", { method: "POST" });
+    await call("/folders/commented/enable", { method: "POST" });
+    const after = readFileSync(file(), "utf8");
+
+    // Parking a folder must not be a whole-file rewrite. `overrides` is the
+    // canary: it is schema-known but easy to lose to a validate-and-re-emit
+    // round trip, and losing it silently changes how a host syncs.
+    expect(after).toContain("overrides:");
+    expect(after).toContain("ignore_perms: false");
+    expect(after).toBe(before);
+  });
+
+  it("refuses to write at all when the file has a key the schema rejects", async () => {
+    writeFileSync(file(), `${COMMENTED}mystery_key: 1\n`);
+    const before = readFileSync(file(), "utf8");
+    const r = await call("/folders/commented/disable", { method: "POST" });
+    expect(r.status).toBe(400);
+    // Refusing is the safe failure; half-writing the file is not.
+    expect(readFileSync(file(), "utf8")).toBe(before);
+  });
+
+  it("keeps the comments of keys an update did not touch", async () => {
+    const current = (await (await call("/folders/commented")).json()) as Record<string, unknown>;
+    const r = await call("/folders/commented", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      // Change only the schedule; everything else is resubmitted unchanged.
+      body: JSON.stringify({ ...current, bisync: { schedule: "30 5 * * *", flags: ["--modify-window=1s"] } }),
+    });
+    expect(r.status).toBe(200);
+
+    const after = readFileSync(file(), "utf8");
+    expect(after).toContain("30 5 * * *");
+    // Untouched keys keep their comments...
+    expect(after).toContain("# Why this folder exists at all.");
+    expect(after).toContain("# The Mac is the one people actually type on.");
+    expect(after).toContain("ignore_perms: true");
+    // ...while the subtree that genuinely changed is re-emitted.
+    expect(after).not.toContain("# Second-precision modtimes");
+  });
+
+  it("drops a key that the update removed", async () => {
+    const current = (await (await call("/folders/commented")).json()) as Record<string, unknown>;
+    delete current.ignore_perms;
+    const r = await call("/folders/commented", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(current),
+    });
+    expect(r.status).toBe(200);
+    const after = readFileSync(file(), "utf8");
+    // Anchored: `ignore_perms` also appears nested under overrides, which must
+    // survive — only the top-level key was removed.
+    expect(after).not.toMatch(/^ignore_perms:/m);
+    expect(after).toContain("overrides:");
+  });
+});
+
+describe("bisync flags reach rclone", () => {
+  const armFilter = () => {
+    mkdirSync(join(configDir, "compiled", "base-binaries"), { recursive: true });
+    writeFileSync(join(configDir, "compiled", "base-binaries", "filter.rclone"), "+ **\n");
+  };
+  const withFlags = (flags: string[]) =>
+    writeFileSync(
+      join(configDir, "folders", "flagged.yaml"),
+      [
+        "name: flagged",
+        "ruleset: base-binaries",
+        "type: send-receive",
+        "paths:",
+        "  qnap-ts453d: /share/Sync/flagged",
+        "  gdrive: sync/flagged",
+        "bisync:",
+        "  flags:",
+        ...flags.map((f) => `    - ${f}`),
+      ].join("\n"),
+    );
+
+  beforeEach(armFilter);
+
+  it("carries the manifest's flags — the scheduled leg's semantics, on demand", async () => {
+    withFlags([
+      "--resilient",
+      "--recover",
+      "--max-lock=2m",
+      "--compare=size,modtime",
+      "--modify-window=1s",
+    ]);
+    rcloneFake.calls.length = 0;
+    const r = await call("/folders/flagged/bisync?async=true", { method: "POST" });
+    expect(r.status).toBe(200);
+
+    const args = rcloneFake.calls.find((c) => c.method === "bisync")!.args[0] as {
+      extra: Record<string, unknown>;
+    };
+    expect(args.extra.resilient).toBe(true);
+    expect(args.extra.recover).toBe(true);
+    expect(args.extra.maxLock).toBe("2m");
+    expect(args.extra.compare).toBe("size,modtime");
+    // The one whose absence aborts the run on NAS-seconds vs Drive-milliseconds.
+    expect(args.extra._config).toEqual({ ModifyWindow: "1s" });
+  });
+
+  it("refuses rather than running with a flag it cannot express", async () => {
+    withFlags(["--resilient", "--some-future-bisync-thing"]);
+    const r = await call("/folders/flagged/bisync?async=true", { method: "POST" });
+    expect(r.status).toBe(400);
+    const body = (await r.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("UNSUPPORTED_BISYNC_FLAG");
+    expect(body.error.message).toContain("--some-future-bisync-thing");
+  });
+
+  it("warns, but still runs, when a backend option cannot be set per call", async () => {
+    // --drive-skip-gdocs configures the remote. Passing it as a connection
+    // string would change the path pair, and bisync keys its session state on
+    // that — an on-demand run would fork off the scheduled one's listings.
+    withFlags(["--resilient", "--drive-skip-gdocs"]);
+    const r = await call("/folders/flagged/bisync?async=true", { method: "POST" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { warnings?: string[] };
+    expect(body.warnings?.join(" ")).toContain("--drive-skip-gdocs");
+    expect(body.warnings?.join(" ")).toContain("rclone.conf");
+    // Must not claim the option is missing — it may already be set on the
+    // remote, which is exactly where it belongs.
+    expect(body.warnings?.join(" ")).not.toContain("add it to the remote");
+  });
+
+  it("names the filter path the rclone host would see", async () => {
+    withFlags(["--resilient"]);
+    const r = await call("/folders/flagged/bisync?async=true", { method: "POST" });
+    const body = (await r.json()) as { filtersFile: string };
+    // No SC_RCLONE_FILTERS_DIR in this suite, so it stays the local path.
+    expect(body.filtersFile).toBe(join(configDir, "compiled", "base-binaries", "filter.rclone"));
   });
 });

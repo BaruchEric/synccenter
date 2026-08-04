@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml, parseDocument, isMap } from "yaml";
 import { SyncthingError } from "@synccenter/adapters";
 import {
   apply as applyPlan,
@@ -18,7 +19,12 @@ import type { Db } from "../db.ts";
 import { listYamlNames } from "./fs.ts";
 import { buildAdapterPool, buildFolderPlan } from "./plan.ts";
 
-export type FolderServiceCode = "SCHEMA_INVALID" | "NAME_TAKEN" | "UNKNOWN_HOST" | "UNKNOWN_RULESET";
+export type FolderServiceCode =
+  | "SCHEMA_INVALID"
+  | "NAME_TAKEN"
+  | "NOT_FOUND"
+  | "UNKNOWN_HOST"
+  | "UNKNOWN_RULESET";
 
 export class FolderServiceError extends Error {
   constructor(
@@ -44,6 +50,138 @@ export const RESERVED_FOLDER_NAMES = new Set(["new"]);
  * exist, name must be free) and write it as canonical YAML under folders/.
  */
 export function createFolder(cfg: ApiConfig, value: unknown): CreatedFolder {
+  const manifest = validateAgainstRepo(cfg, value);
+
+  const file = join(cfg.foldersDir, `${manifest.name}.yaml`);
+  if (existsSync(file)) {
+    throw new FolderServiceError(`folder '${manifest.name}' already exists (folders/${manifest.name}.yaml)`, "NAME_TAKEN");
+  }
+
+  writeFileSync(file, canonicalEmit(manifest, FOLDER_KEY_ORDER), "utf8");
+  return { manifest, relPath: `folders/${manifest.name}.yaml` };
+}
+
+/**
+ * Replace an existing manifest wholesale. The name is taken from the URL, not
+ * the body: allowing a rename here would silently orphan the compiled
+ * artifacts and the live Syncthing folder ID, which is a different (and much
+ * more dangerous) operation than an edit.
+ */
+export function updateFolder(cfg: ApiConfig, name: string, value: unknown): CreatedFolder {
+  const file = join(cfg.foldersDir, `${name}.yaml`);
+  if (!existsSync(file)) {
+    throw new FolderServiceError(`folder not found: ${name}`, "NOT_FOUND");
+  }
+  const incoming = (value ?? {}) as Record<string, unknown>;
+  if (typeof incoming.name === "string" && incoming.name !== name) {
+    throw new FolderServiceError(
+      `cannot rename '${name}' to '${incoming.name}' — delete and recreate instead`,
+      "SCHEMA_INVALID",
+    );
+  }
+  const manifest = validateAgainstRepo(cfg, { ...incoming, name });
+  writeManifestPreserving(file, manifest);
+  return { manifest, relPath: `folders/${name}.yaml` };
+}
+
+/** Remove the manifest. Live host folders and on-disk data are untouched. */
+export function deleteFolder(cfg: ApiConfig, name: string): { relPath: string } {
+  const file = join(cfg.foldersDir, `${name}.yaml`);
+  if (!existsSync(file)) {
+    throw new FolderServiceError(`folder not found: ${name}`, "NOT_FOUND");
+  }
+  unlinkSync(file);
+  return { relPath: `folders/${name}.yaml` };
+}
+
+/** Park or un-park a folder without touching the rest of its manifest. */
+export function setFolderEnabled(cfg: ApiConfig, name: string, enabled: boolean): CreatedFolder {
+  const file = join(cfg.foldersDir, `${name}.yaml`);
+  if (!existsSync(file)) {
+    throw new FolderServiceError(`folder not found: ${name}`, "NOT_FOUND");
+  }
+  const raw = readFileSync(file, "utf8");
+  const current = parseYaml(raw) as Record<string, unknown>;
+  // Enabled is the default, so drop the key rather than writing `enabled: true`
+  // and leaving noise in the committed YAML.
+  if (enabled) delete current.enabled;
+  else current.enabled = false;
+
+  // Validate the outcome before touching the file, so a manifest that is
+  // already broken fails here rather than being half-rewritten.
+  const manifest = validateAgainstRepo(cfg, { ...current, name });
+
+  // Then write ONLY the one key. This verb knows exactly what it changes, so it
+  // has no business running the general update path — that one reconciles the
+  // file against a schema-validated object and deletes anything missing from
+  // it, which is far more authority than "park this folder" needs.
+  const doc = parseDocument(raw);
+  if (enabled) doc.delete("enabled");
+  else doc.set("enabled", false);
+  writeFileSync(file, doc.toString(), "utf8");
+
+  return { manifest, relPath: `folders/${name}.yaml` };
+}
+
+/**
+ * Write a manifest over an existing file without flattening it.
+ *
+ * These YAML files are hand-written and live in git; the comments are where the
+ * reasoning is kept ("NAS lists second-precision modtimes, Drive millisecond —
+ * without a tolerance bisync's final listing self-check aborts on every
+ * photo"). Re-emitting the whole document from the parsed object is correct
+ * about values and silently deletes all of that, so a one-character schedule
+ * edit would cost the file its entire history of why.
+ *
+ * Instead: touch only the top-level keys whose value actually changed. Anything
+ * the edit did not affect keeps its comments, its ordering and its formatting
+ * byte-for-byte. A key that did change loses the comments nested inside it —
+ * unavoidable, since that subtree is being replaced.
+ */
+function writeManifestPreserving(file: string, manifest: FolderManifest): void {
+  if (!existsSync(file)) {
+    writeFileSync(file, canonicalEmit(manifest, FOLDER_KEY_ORDER), "utf8");
+    return;
+  }
+  const doc = parseDocument(readFileSync(file, "utf8"));
+  if (!isMap(doc.contents)) {
+    // Not a mapping (empty or corrupt); nothing to preserve.
+    writeFileSync(file, canonicalEmit(manifest, FOLDER_KEY_ORDER), "utf8");
+    return;
+  }
+
+  const next = manifest as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(next)) {
+    const current = doc.hasIn([key]) ? (doc.getIn([key], false) as unknown) : undefined;
+    const currentJs =
+      current !== undefined && typeof current === "object" && current !== null && "toJSON" in current
+        ? (current as { toJSON: () => unknown }).toJSON()
+        : current;
+    if (!doc.hasIn([key]) || !sameValue(currentJs, value)) doc.set(key, value);
+  }
+  for (const key of doc.contents.items.map((i) => String((i.key as { value?: unknown })?.value))) {
+    if (!(key in next)) doc.delete(key);
+  }
+
+  writeFileSync(file, doc.toString(), "utf8");
+}
+
+/** Order-insensitive deep equality, so a re-serialised object isn't "changed". */
+function sameValue(a: unknown, b: unknown): boolean {
+  return stable(a) === stable(b);
+}
+
+function stable(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+  if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
+  const entries = Object.entries(v as Record<string, unknown>)
+    .filter(([, x]) => x !== undefined)
+    .sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
+  return `{${entries.map(([k, x]) => `${JSON.stringify(k)}:${stable(x)}`).join(",")}}`;
+}
+
+/** Schema validation plus the cross-references only the config repo can answer. */
+function validateAgainstRepo(cfg: ApiConfig, value: unknown) {
   const v = validateFolderManifest(value);
   if (!v.ok) throw new FolderServiceError(v.errors, "SCHEMA_INVALID");
   const manifest = v.manifest;
@@ -77,15 +215,7 @@ export function createFolder(cfg: ApiConfig, value: unknown): CreatedFolder {
       "UNKNOWN_HOST",
     );
   }
-
-  const file = join(cfg.foldersDir, `${manifest.name}.yaml`);
-  if (existsSync(file)) {
-    throw new FolderServiceError(`folder '${manifest.name}' already exists (folders/${manifest.name}.yaml)`, "NAME_TAKEN");
-  }
-
-  const yaml = canonicalEmit(manifest, FOLDER_KEY_ORDER);
-  writeFileSync(file, yaml, "utf8");
-  return { manifest, relPath: `folders/${manifest.name}.yaml` };
+  return manifest;
 }
 
 export type ApplyOutcome =
@@ -106,6 +236,18 @@ export interface ApplyFolderOpts {
  * a `blocked` outcome instead of throwing so callers can offer prune/force.
  */
 export async function applyFolder(cfg: ApiConfig, db: Db, name: string, opts: ApplyFolderOpts): Promise<ApplyOutcome> {
+  {
+    const file = join(cfg.foldersDir, `${name}.yaml`);
+    if (existsSync(file)) {
+      const raw = parseYaml(readFileSync(file, "utf8")) as { enabled?: boolean } | null;
+      if (raw?.enabled === false) {
+        throw new FolderServiceError(
+          `folder '${name}' is disabled — enable it before applying`,
+          "SCHEMA_INVALID",
+        );
+      }
+    }
+  }
   const p = buildFolderPlan(cfg, name);
   const pool = buildAdapterPool(cfg);
   const live = await collectLiveState(p, pool);

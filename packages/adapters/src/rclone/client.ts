@@ -119,6 +119,7 @@ export class RcloneClient {
     if (params.filtersFile !== undefined) body.filtersFile = params.filtersFile;
     if (params.maxLock !== undefined) body.maxLock = params.maxLock;
     if (params.dryRun !== undefined) body.dryRun = params.dryRun;
+    if (params.statsGroup !== undefined) body._group = params.statsGroup;
     if (params.extra) Object.assign(body, params.extra);
 
     return this.call("sync/bisync", body);

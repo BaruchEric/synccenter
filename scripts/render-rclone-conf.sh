@@ -10,9 +10,17 @@
 #                       `rclone authorize "drive"` signed in to that account and
 #                       seal the JSON into secrets/gdrive-baruchriollc-oauth-token.enc.json.
 #
+# skip_gdocs on every drive remote: Google Docs/Sheets/Slides have no
+# downloadable bytes, so bisync trips over them. The crontab passes
+# --drive-skip-gdocs per run; setting it here means an on-demand run through the
+# API behaves the same, since the rc API has no way to pass a backend flag
+# per call. (Config key confirmed from `rclone help backend drive`.)
+#
 # Use it to seed:
 #   - ~/.config/rclone/rclone.conf            (Mac host)
-#   - /share/Container/synccenter/rclone-config/rclone.conf  (QNAP rclone-rcd container)
+#   - /share/Container/synccenter/rclone-config/rclone.conf  (QNAP; mounted
+#     into rclone-rcd as /config, read-write, so rclone persists refreshed
+#     OAuth tokens there — prefer editing in place over overwriting)
 #
 # Examples:
 #   scripts/render-rclone-conf.sh > ~/.config/rclone/rclone.conf
@@ -45,12 +53,14 @@ cat <<EOF
 type = drive
 scope = drive
 root_folder_id = ${ROOT_FOLDER_ID}
+skip_gdocs = true
 token = ${TOKEN_JSON}
 
 # Same account, but rooted at /My Drive — the HBS3 "Arik" job destination.
 [gdrive-arik]
 type = drive
 scope = drive
+skip_gdocs = true
 token = ${TOKEN_JSON}
 EOF
 
@@ -63,6 +73,7 @@ if [[ -f "${BRIO_TOKEN_FILE}" ]]; then
 [gdrive-baruchriollc]
 type = drive
 scope = drive
+skip_gdocs = true
 token = ${BRIO_TOKEN_JSON}
 EOF
 else

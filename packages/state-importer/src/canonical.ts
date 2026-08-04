@@ -3,6 +3,7 @@ import { stringify } from "yaml";
 export const FOLDER_KEY_ORDER = [
   "name",
   "ruleset",
+  "enabled",
   "type",
   "paths",
   "bisync",

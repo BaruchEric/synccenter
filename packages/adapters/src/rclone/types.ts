@@ -25,6 +25,8 @@ export interface RcloneStats {
   totalBytes?: number;
   totalChecks?: number;
   totalTransfers?: number;
+  /** Entries walked so far — climbs during bisync's listing phase. */
+  listed?: number;
   transferTime?: number;
   transfers?: number;
   lastError?: string;
@@ -102,6 +104,13 @@ export interface BisyncParams {
   filtersFile?: string;
   /** Max lock duration, e.g. "2m". */
   maxLock?: string;
+  /**
+   * Accounting group for this call (`_group`), so its progress can be read back
+   * with `core/stats?group=<name>`. Supply one for any async job you intend to
+   * show progress for: the `job/<jobid>` group people reach for first stays at
+   * zero for bisync.
+   */
+  statsGroup?: string;
   /** Dry run — show what would happen, don't change anything. */
   dryRun?: boolean;
   /** Pass-through for any flag not covered by the convenience fields above. */

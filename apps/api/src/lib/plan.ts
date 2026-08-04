@@ -32,8 +32,44 @@ export function buildFolderPlanFor(
   const compiledIgnoreLines = compiled.stignore
     .split("\n")
     .filter((l) => l && !l.startsWith("#"));
-  const filtersFile = join(cfg.compiledDir, folder.ruleset, "filter.rclone");
-  return buildPlan({ folder, hosts, compiledIgnoreLines, filtersFile, secrets });
+  return buildPlan({
+    folder,
+    hosts,
+    compiledIgnoreLines,
+    filtersFile: rcloneFilterPath(cfg, folder),
+    secrets,
+  });
+}
+
+/**
+ * Where the compiled rclone filter for a folder lives.
+ *
+ * Compilation is per-ruleset, not per-folder — two folders sharing a ruleset
+ * share one artifact — so the path is keyed by `ruleset`. Anything that needs
+ * the file must go through here: computing it from the folder name instead
+ * silently misses every time, and the only symptom is a 409 saying the filter
+ * has not been compiled yet.
+ */
+export function rcloneFilterPath(cfg: ApiConfig, folder: { ruleset: string }): string {
+  return join(cfg.compiledDir, folder.ruleset, "filter.rclone");
+}
+
+/**
+ * The filter path to hand to the rclone daemon.
+ *
+ * When SC_RCLONE_FILTERS_DIR is set the daemon lives elsewhere in the
+ * filesystem, so we name the file the way IT sees it, using the same
+ * `<ruleset>.rclone` convention the generated crontab uses — on-demand and
+ * scheduled runs then load byte-for-byte the same filter.
+ */
+export function rcloneFilterPathForDaemon(
+  cfg: ApiConfig,
+  folder: { ruleset: string },
+): { path: string; local: boolean } {
+  if (cfg.rcloneFiltersDir) {
+    return { path: `${cfg.rcloneFiltersDir.replace(/\/+$/, "")}/${folder.ruleset}.rclone`, local: false };
+  }
+  return { path: rcloneFilterPath(cfg, folder), local: true };
 }
 
 export function buildFolderPlan(cfg: ApiConfig, name: string): ApplyPlan {

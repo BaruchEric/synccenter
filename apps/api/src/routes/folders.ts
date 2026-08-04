@@ -7,18 +7,33 @@ import { loadAllHosts, PlanError, resolveBisyncAnchor } from "@synccenter/apply-
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 import { listYamlNames, parseFolderByName } from "../lib/fs.ts";
-import { buildFolderPlan } from "../lib/plan.ts";
-import { applyFolder, createFolder, FolderServiceError } from "../lib/folders-service.ts";
+import { buildFolderPlan, rcloneFilterPathForDaemon } from "../lib/plan.ts";
+import { planBisyncFlags, BisyncFlagError } from "../lib/bisync-flags.ts";
+import {
+  applyFolder,
+  createFolder,
+  deleteFolder,
+  setFolderEnabled,
+  updateFolder,
+  FolderServiceError,
+} from "../lib/folders-service.ts";
 import { respondJsonError } from "../lib/errors.ts";
 import { HostRegistry, HostRegistryError } from "../registry.ts";
+import type { EventBus, FolderAction } from "../lib/bus.ts";
+import { startRun, toView } from "../lib/runs-service.ts";
 
 export function foldersRouter(
   cfg: ApiConfig,
   registry: HostRegistry,
   db: Db,
   rclone: RcloneClient | null,
+  bus: EventBus,
 ): Router {
   const r = Router();
+
+  /** Tell every open dashboard that this folder moved. */
+  const announce = (folder: string, action: FolderAction) =>
+    bus.emit({ type: "folder", folder, action });
 
   r.get("/folders", (_req, res) => {
     res.json({ folders: listYamlNames(cfg.foldersDir) });
@@ -27,6 +42,7 @@ export function foldersRouter(
   r.post("/folders", (req, res) => {
     try {
       const created = createFolder(cfg, req.body);
+      announce(created.manifest.name, "created");
       res.status(201).json({ folder: created.manifest, path: created.relPath });
     } catch (err) {
       if (err instanceof FolderServiceError) {
@@ -97,9 +113,53 @@ export function foldersRouter(
     return { folder: m.name, perHost: results };
   };
 
+  r.put("/folders/:name", (req, res) => {
+    try {
+      const out = updateFolder(cfg, req.params.name, req.body);
+      announce(out.manifest.name, "updated");
+      res.json({ folder: out.manifest, path: out.relPath });
+    } catch (err) {
+      respondFolderServiceError(res, err);
+    }
+  });
+
+  r.delete("/folders/:name", (req, res) => {
+    // Deleting a manifest un-manages a folder that may hold the only copy of
+    // real data, so it takes the same explicit confirm as apply.
+    if (req.body?.confirm !== true) {
+      res.status(400).json({
+        error: {
+          code: "CONFIRM_REQUIRED",
+          message: "DELETE body must include { confirm: true }. Host folders and data are left untouched.",
+        },
+      });
+      return;
+    }
+    try {
+      const out = deleteFolder(cfg, req.params.name);
+      announce(req.params.name, "deleted");
+      res.json({ deleted: req.params.name, path: out.relPath });
+    } catch (err) {
+      respondFolderServiceError(res, err);
+    }
+  });
+
+  for (const [suffix, enabled] of [["enable", true], ["disable", false]] as const) {
+    r.post(`/folders/:name/${suffix}`, (req, res) => {
+      try {
+        const out = setFolderEnabled(cfg, req.params.name, enabled);
+        announce(out.manifest.name, enabled ? "enabled" : "disabled");
+        res.json({ folder: out.manifest, path: out.relPath });
+      } catch (err) {
+        respondFolderServiceError(res, err);
+      }
+    });
+  }
+
   r.post("/folders/:name/pause", async (req, res) => {
     try {
       const out = await broadcast(cfg.foldersDir, req.params.name, "pause");
+      announce(out.folder, "paused");
       res.json(out);
     } catch (err) {
       respondFolderError(res, err, req.params.name);
@@ -109,6 +169,7 @@ export function foldersRouter(
   r.post("/folders/:name/resume", async (req, res) => {
     try {
       const out = await broadcast(cfg.foldersDir, req.params.name, "resume");
+      announce(out.folder, "resumed");
       res.json(out);
     } catch (err) {
       respondFolderError(res, err, req.params.name);
@@ -150,6 +211,7 @@ export function foldersRouter(
         });
         return;
       }
+      announce(req.params.name, "applied");
       res.json({ result: outcome.result, delta: outcome.delta });
     } catch (err) {
       if (err instanceof CompileError) {
@@ -200,13 +262,30 @@ export function foldersRouter(
     }
     const path1 = m.paths[anchorName]!; // resolver guarantees the anchor is in paths
 
-    const filterPath = join(cfg.compiledDir, m.name, "filter.rclone");
-    const filterExists = existsSync(filterPath);
-    if (!filterExists) {
+    // Keyed by ruleset, not folder, and named the way the DAEMON sees it.
+    const filter = rcloneFilterPathForDaemon(cfg, m);
+    // Only checkable when the daemon shares our filesystem. When it does not,
+    // rclone is the backstop: a filters file it cannot open aborts the run
+    // outright rather than syncing unfiltered (verified against rclone 1.75).
+    if (filter.local && !existsSync(filter.path)) {
       res.status(409).json({
-        error: `compiled filter.rclone missing at ${filterPath}. Run POST /folders/${m.name}/apply first.`,
+        error: `compiled filter.rclone missing at ${filter.path}. Run POST /folders/${m.name}/apply first.`,
       });
       return;
+    }
+
+    // The scheduled crontab runs this leg with the manifest's flags; an
+    // on-demand run that quietly omitted them would be a different operation
+    // wearing the same name.
+    let flagPlan;
+    try {
+      flagPlan = planBisyncFlags(m.bisync?.flags);
+    } catch (err) {
+      if (err instanceof BisyncFlagError) {
+        res.status(400).json({ error: { code: "UNSUPPORTED_BISYNC_FLAG", message: err.message } });
+        return;
+      }
+      throw err;
     }
 
     const path2 = `${member.remote}:${m.paths[memberName]}`;
@@ -214,33 +293,81 @@ export function foldersRouter(
     const dryRun = req.query.dryRun === "true";
     const resync = req.query.resync === "true";
 
+    // Progress is only readable from a group we name ourselves — rclone's
+    // `job/<jobid>` group stays empty for bisync. Unique per trigger so two
+    // runs of the same folder never share a counter.
+    const statsGroup = `sc/bisync/${m.name}/${crypto.randomUUID().slice(0, 8)}`;
+
     try {
       const out = await rclone.bisync({
         path1,
         path2,
-        filtersFile: filterPath,
+        filtersFile: filter.path,
+        statsGroup,
         ...(async ? { async: true } : {}),
         ...(dryRun ? { dryRun: true } : {}),
         ...(resync ? { resync: true } : {}),
+        extra: {
+          ...flagPlan.params,
+          ...(Object.keys(flagPlan.config).length > 0 ? { _config: flagPlan.config } : {}),
+        },
       });
+
+      const note = `path1=${path1} path2=${path2}${async ? " async" : ""}${dryRun ? " dryRun" : ""}${resync ? " resync" : ""}`;
+
+      if (async && typeof out.jobid === "number") {
+        // Leave apply_history alone: the tracker writes the row when the job
+        // actually ends, with its real result. Recording it here would put a
+        // finished-looking event on the timeline for a job still running.
+        const run = startRun(db, {
+          folder: m.name,
+          member: memberName,
+          jobid: out.jobid,
+          statsGroup,
+          actor: "api-bearer",
+          source: "api",
+          dryRun,
+          resync,
+        });
+        bus.emit({ type: "run", run: toView(run) });
+        res.json({
+          folder: m.name,
+          path1,
+          path2,
+          runId: run.id,
+          filtersFile: filter.path,
+          ...(flagPlan.warnings.length > 0 ? { warnings: flagPlan.warnings } : {}),
+          ...out,
+        });
+        return;
+      }
+
+      // Synchronous: it is already over by the time we get here.
       db.run(
         `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
          VALUES (?, 'api-bearer', 'api', 'folder', ?, ?, ?, ?)`,
-        [
-          new Date().toISOString(),
-          m.name,
-          "bisync-trigger",
-          dryRun ? "dry-run" : "ok",
-          `path1=${path1} path2=${path2}${async ? " async" : ""}${dryRun ? " dryRun" : ""}${resync ? " resync" : ""}`,
-        ],
+        [new Date().toISOString(), m.name, "bisync", dryRun ? "dry-run" : "ok", note],
       );
-      res.json({ folder: m.name, path1, path2, ...out });
+      announce(m.name, "applied");
+      res.json({
+        folder: m.name,
+        path1,
+        path2,
+        filtersFile: filter.path,
+        ...(flagPlan.warnings.length > 0 ? { warnings: flagPlan.warnings } : {}),
+        ...out,
+      });
     } catch (err) {
       if (err instanceof RcloneError) {
         res.status(502).json({
-          error: err.message,
+          // rclone says "bisync aborted" and nothing else; the filter it was
+          // told to open is the first thing worth checking.
+          error: `${err.message} — rclone was asked to load ${filter.path}${
+            filter.local ? "" : " (a path on the rclone host, not this one)"
+          }`,
           endpoint: err.endpoint,
           upstreamStatus: err.status,
+          filtersFile: filter.path,
         });
         return;
       }
@@ -249,6 +376,16 @@ export function foldersRouter(
   });
 
   return r;
+}
+
+/** Map a FolderServiceError onto the right status; anything else is a 500. */
+function respondFolderServiceError(res: import("express").Response, err: unknown): void {
+  if (err instanceof FolderServiceError) {
+    const status = err.code === "NOT_FOUND" ? 404 : err.code === "NAME_TAKEN" ? 409 : 400;
+    res.status(status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+  respondJsonError(res, err, { knownStatus: 500 });
 }
 
 function errorMessage(err: unknown): string {

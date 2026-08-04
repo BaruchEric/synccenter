@@ -17,6 +17,11 @@
       "pattern": "^[a-z][a-z0-9-]*$",
       "description": "Ruleset name from rules/. Compiled per-folder into compiled/<name>/."
     },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "False parks the folder: no bisync legs are scheduled and apply refuses. Config-level and durable — use pause/resume for a runtime hold on the live Syncthing folders."
+    },
     "type": {
       "type": "string",
       "enum": ["send-receive", "send-only", "receive-only", "receive-encrypted"],

@@ -33,6 +33,8 @@ export interface BisyncSettings {
 export interface FolderManifest {
   name: string;
   ruleset: string;
+  /** Absent means enabled; false parks the folder (no schedule, apply refused). */
+  enabled?: boolean;
   type: "send-receive" | "send-only" | "receive-only" | "receive-encrypted";
   /** Per-member paths: local absolute path for syncthing members, remote path for rclone members. */
   paths: Record<string, string>;

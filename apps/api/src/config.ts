@@ -11,6 +11,19 @@ export interface ApiConfig {
   apiToken: string;
   port: number;
   dbPath: string;
+  /**
+   * Where the rclone daemon can find compiled filter files, expressed in the
+   * DAEMON's filesystem, not ours.
+   *
+   * `filtersFile` is opened by rclone, which normally runs in a different
+   * container: here the API sees the config repo at /srv/synccenter-config
+   * while the rcd sees the same directory at /share/…/synccenter-config, so a
+   * path computed locally means nothing to the process that has to read it.
+   * Point this at the directory the scheduled crontab already uses
+   * (/config/filters) so on-demand runs and nightly runs read the same file.
+   * Unset is correct when both share a filesystem.
+   */
+  rcloneFiltersDir?: string;
   rclone?: {
     url: string;
     username?: string;
@@ -35,6 +48,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     throw new Error(`PORT must be 0-65535, got ${env.PORT}`);
   }
   const dbPath = env.SC_DB_PATH ?? ":memory:";
+  const rcloneFiltersDir = env.SC_RCLONE_FILTERS_DIR;
 
   const rclone = env.SC_RCLONE_URL
     ? {
@@ -55,6 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     apiToken,
     port,
     dbPath,
+    ...(rcloneFiltersDir ? { rcloneFiltersDir } : {}),
     ...(rclone ? { rclone } : {}),
   };
 }
