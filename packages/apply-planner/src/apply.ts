@@ -44,9 +44,21 @@ async function executeOps(host: HostName, ops: SyncthingOp[], pool: AdapterPool)
       case "patchFolder":
         await retry(() => client.patchFolder(op.folderId, op.patch));
         break;
-      case "setIgnores":
-        await retry(() => client.setIgnores(op.folderId, op.lines));
+      case "setIgnores": {
+        const res = await retry(() => client.setIgnores(op.folderId, op.lines));
+        // Syncthing accepts the POST with 200 and reports a whole-file parse
+        // failure in the response body. One unsupported glob discards EVERY
+        // rule, so ignoring this ships a folder that syncs with no exclusions
+        // at all while apply reports success. Checked OUTSIDE retry(): a
+        // rejected pattern is not transient, so retrying only delays the
+        // failure. `?.` because older daemons and test doubles may not send it.
+        if (res?.error) {
+          throw new Error(
+            `${op.host} rejected the ignore file for ${op.folderId} — ALL ignore rules are inactive: ${res.error}`,
+          );
+        }
         break;
+      }
       case "removeFolder":
         await retry(() => client.removeFolder(op.folderId));
         break;

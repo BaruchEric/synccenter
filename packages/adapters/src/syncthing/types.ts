@@ -56,6 +56,14 @@ export interface SyncthingFolderStatus {
   globalFiles: number;
   localBytes: number;
   localFiles: number;
+  /**
+   * Bytes that match the global index. `/folders/:name/state` passes this
+   * response through verbatim and the dashboard's progress readout divides by
+   * `globalBytes`, so it has to be declared here too — the web type used to be
+   * the only place it appeared, which meant the server's own model of the wire
+   * format said the field did not exist.
+   */
+  inSyncBytes: number;
   needBytes: number;
   needFiles: number;
   errors: number;

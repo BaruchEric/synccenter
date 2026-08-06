@@ -52,6 +52,24 @@ groups:
         annotations:
           summary: "Apply failures in the last hour: {{ $value }}"
 
+      # The silent one. Syncthing discards the ENTIRE ignore file when a single
+      # pattern is unsupported, so the folder starts replicating everything the
+      # ruleset exists to keep out — secrets included — while state, error and
+      # need counts all stay green. On 2026-08-05 that ran unnoticed for two
+      # days on both arik members. Page on it: nothing else notices.
+      - alert: SyncCenterIgnoreFileRejected
+        # Joined against state_info on purpose. Syncthing answers db/ignores
+        # with HTTP 200 and error="folder X does not exist" for a folder that
+        # is in the manifest but not yet applied to that host, which would page
+        # on benign config. A folder with no live status has no state_info
+        # sample, so the join drops it.
+        expr: synccenter_folder_ignores_error > 0 and on(folder, host) synccenter_folder_state_info == 1
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Folder {{ $labels.folder }} on {{ $labels.host }} is syncing with NO ignore rules (ignore file rejected)"
+
       - alert: SyncCenterScrapeBackendErrors
         expr: synccenter_folder_scrape_error == 1
         for: 10m

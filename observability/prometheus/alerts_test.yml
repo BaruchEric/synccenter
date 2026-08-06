@@ -1,0 +1,91 @@
+# Unit tests for alerts.yml. Run with:
+#
+#   promtool test rules observability/prometheus/alerts_test.yml
+#
+# These exist for SyncCenterIgnoreFileRejected specifically. `promtool check
+# rules` only proves the PromQL parses; it cannot tell whether the vector join
+# selects the right series, and this rule is ALL join. Getting it wrong fails
+# in the expensive direction: the alert is the only thing that notices a
+# rejected ignore file, so a join that silently matches nothing looks exactly
+# like a healthy fleet.
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # The case the alert exists for: ignores rejected on a host that IS live.
+  - interval: 1m
+    input_series:
+      - series: 'synccenter_folder_ignores_error{folder="arik",host="mac-studio"}'
+        values: "1+0x10"
+      # `state` is on state_info but NOT on ignores_error. `and` keeps the
+      # LHS labels, so the fired alert must NOT inherit state="idle" — if it
+      # ever does, the join has been rewritten into a binary op.
+      - series: 'synccenter_folder_state_info{folder="arik",host="mac-studio",state="idle"}'
+        values: "1+0x10"
+    alert_rule_test:
+      # `for: 2m` — one minute in, it is pending, not firing.
+      - eval_time: 1m
+        alertname: SyncCenterIgnoreFileRejected
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: SyncCenterIgnoreFileRejected
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              folder: arik
+              host: mac-studio
+            exp_annotations:
+              summary: "Folder arik on mac-studio is syncing with NO ignore rules (ignore file rejected)"
+
+  # The guard. A folder in the manifest but not yet applied to this host gets
+  # HTTP 200 + error="folder X does not exist" from db/ignores, so
+  # ignores_error is 1 — but the host has no live status, hence no state_info
+  # sample, and the join must drop it. Verified against the real /metrics:
+  # example-code-projects has ignores_error 1 and no state_info on any host.
+  - interval: 1m
+    input_series:
+      - series: 'synccenter_folder_ignores_error{folder="example-code-projects",host="qnap-ts453d"}'
+        values: "1+0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SyncCenterIgnoreFileRejected
+        exp_alerts: []
+
+  # A live host whose ignore file parsed fine. ignores_error 0 fails the `> 0`,
+  # so the alert stays silent even though state_info is present.
+  - interval: 1m
+    input_series:
+      - series: 'synccenter_folder_ignores_error{folder="baruchrio",host="mac-studio"}'
+        values: "0+0x10"
+      - series: 'synccenter_folder_state_info{folder="baruchrio",host="mac-studio",state="idle"}'
+        values: "1+0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SyncCenterIgnoreFileRejected
+        exp_alerts: []
+
+  # Per-member, not per-folder. The same folder can be fine on one host and
+  # rejected on another — arik has diverged this way before — so exactly one
+  # alert must fire, carrying the bad host.
+  - interval: 1m
+    input_series:
+      - series: 'synccenter_folder_ignores_error{folder="arik",host="mac-studio"}'
+        values: "0+0x10"
+      - series: 'synccenter_folder_state_info{folder="arik",host="mac-studio",state="idle"}'
+        values: "1+0x10"
+      - series: 'synccenter_folder_ignores_error{folder="arik",host="qnap-ts453d"}'
+        values: "1+0x10"
+      - series: 'synccenter_folder_state_info{folder="arik",host="qnap-ts453d",state="scanning"}'
+        values: "1+0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SyncCenterIgnoreFileRejected
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              folder: arik
+              host: qnap-ts453d
+            exp_annotations:
+              summary: "Folder arik on qnap-ts453d is syncing with NO ignore rules (ignore file rejected)"

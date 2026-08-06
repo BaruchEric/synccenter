@@ -285,12 +285,13 @@ export async function applyFolder(cfg: ApiConfig, db: Db, name: string, opts: Ap
 async function collectLiveState(
   p: ApplyPlan,
   pool: AdapterPool,
-): Promise<Record<string, { folder: unknown; ignores: unknown }>> {
-  const out: Record<string, { folder: unknown; ignores: unknown }> = {};
+): Promise<Record<string, { folder: unknown; ignores: unknown; ignoresError: string | null }>> {
+  const out: Record<string, { folder: unknown; ignores: unknown; ignoresError: string | null }> = {};
   for (const host of Object.keys(p.perHost)) {
     const c = pool.syncthing(host);
     let folder: unknown = null;
     let ignores: unknown = null;
+    let ignoresError: string | null = null;
     try {
       folder = await c.getFolder(p.folder);
     } catch (err) {
@@ -304,14 +305,21 @@ async function collectLiveState(
       try {
         const ig = await c.getIgnores(p.folder);
         ignores = ig.ignore ?? [];
-      } catch {
+        // Same reasoning as the folder read above: a failure that isn't a clean
+        // "absent" must NOT pass through as a benign value, or the DIVERGENT
+        // gate below waves it through. Syncthing echoes the stored file back
+        // even when it discarded every pattern, so the line comparison alone
+        // cannot see a rejected ignore file.
+        ignoresError = ig.error ?? null;
+      } catch (err) {
         ignores = [];
+        ignoresError = `could not read ignores: ${(err as Error).message ?? String(err)}`;
       }
       // Bridge: planner type requires label; adapter type doesn't.
       const f = folder as { id: string; label?: string };
       if (f.label === undefined) f.label = f.id;
     }
-    out[host] = { folder, ignores };
+    out[host] = { folder, ignores, ignoresError };
   }
   return out;
 }

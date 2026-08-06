@@ -12,6 +12,7 @@ export async function verify(p: ApplyPlan, pool: AdapterPool): Promise<VerifyRes
     const client = pool.syncthing(host);
     let folder: SyncthingFolderConfig | null = null;
     let ignores: string[] | null = null;
+    let ignoresError: string | null = null;
     try {
       const raw = await client.getFolder(p.folder);
       folder = raw ? normalizeFolder(raw) : null;
@@ -22,11 +23,19 @@ export async function verify(p: ApplyPlan, pool: AdapterPool): Promise<VerifyRes
       try {
         const ig = await client.getIgnores(p.folder);
         ignores = ig.ignore ?? [];
-      } catch {
+        // The read-back that made this function worth calling. Syncthing
+        // returns the file it stored even when it discarded every pattern in
+        // it, so the line comparison below can only confirm the POST landed —
+        // this is the field that says the rules are actually in force.
+        ignoresError = ig.error ?? null;
+      } catch (err) {
         ignores = [];
+        // Do NOT let an unreadable ignore state pass as "verified". Without
+        // this, a timeout here is indistinguishable from an empty ignore file.
+        ignoresError = `could not read ignores: ${(err as Error).message ?? String(err)}`;
       }
     }
-    live[host] = { folder, ignores };
+    live[host] = { folder, ignores, ignoresError };
   }
   const report = computeDelta(p, live);
   const verified = report.divergent.length === 0 && report.liveOnly.length === 0;

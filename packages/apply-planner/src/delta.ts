@@ -3,6 +3,13 @@ import type { ApplyPlan, DriftReport, HostName, SyncthingFolderConfig, Syncthing
 export interface LiveHostState {
   folder: SyncthingFolderConfig | null;
   ignores: string[] | null;
+  /**
+   * Syncthing's parse verdict for the ignore file as a whole, if the reader
+   * captured it. Non-null means EVERY rule was discarded — and the lines still
+   * read back verbatim, so comparing `ignores` alone reports a clean match on a
+   * folder syncing with no exclusions at all.
+   */
+  ignoresError?: string | null;
 }
 
 export type LiveState = Record<HostName, LiveHostState>;
@@ -33,6 +40,17 @@ export function computeDelta(p: ApplyPlan, live: LiveState): DriftReport {
     const addFolderOp = ops.find((o) => o.kind === "addFolder");
     if (addFolderOp && addFolderOp.kind === "addFolder") {
       compareFolderFields(host, addFolderOp.folder, liveState.folder, divergent);
+    }
+
+    // A rejected ignore file is drift no line-by-line comparison can see: the
+    // file is exactly what we wrote, and none of it is in force.
+    if (liveState.ignoresError) {
+      divergent.push({
+        host,
+        path: `perHost.${host}.ignores.parseError`,
+        expected: null,
+        actual: liveState.ignoresError,
+      });
     }
 
     // Check ignores.

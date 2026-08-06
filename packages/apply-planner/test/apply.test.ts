@@ -47,6 +47,26 @@ describe("apply", () => {
     expect(res.hosts.find((h) => h.host === "qnap")?.status).toBe("applied");
   }, 10_000);
 
+  // Syncthing answers the POST with 200 and reports a whole-file parse failure
+  // in the body. One unsupported glob discards EVERY rule, so an apply that
+  // ignores this reports success on a folder now syncing with no exclusions.
+  it("fails the host when Syncthing rejects the ignore file", async () => {
+    const setIgnores = mock(async () => ({
+      ignore: [".DS_Store"],
+      expanded: [],
+      error: 'invalid pattern "[a-gi-z]": parse error',
+    }));
+    const pool = makePool({
+      "mac": { addFolder: async () => undefined, setIgnores, addDevice: async () => undefined, patchFolder: async () => undefined },
+    });
+    const res = await apply(PLAN_TWO_HOSTS, pool, {});
+    const mac = res.hosts.find((h) => h.host === "mac");
+    expect(mac?.status).toBe("failed");
+    expect(mac?.error?.message).toContain("ALL ignore rules are inactive");
+    // A rejected pattern is not transient — it must not be retried.
+    expect(setIgnores).toHaveBeenCalledTimes(1);
+  });
+
   it("dryRun returns 'skipped' for every host and calls nothing", async () => {
     const macAdd = mock(async () => undefined);
     const pool = makePool({ "mac": { addFolder: macAdd, setIgnores: async () => undefined, addDevice: async () => undefined, patchFolder: async () => undefined } });

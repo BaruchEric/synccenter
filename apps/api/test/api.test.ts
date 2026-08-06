@@ -44,6 +44,7 @@ class FakeSyncthing {
       globalFiles: 0,
       localBytes: 0,
       localFiles: 0,
+      inSyncBytes: 0,
       needBytes: 0,
       needFiles: 0,
       errors: 0,
@@ -62,11 +63,21 @@ class FakeSyncthing {
   async getIgnores(folder: string) {
     this.calls.push({ method: "getIgnores", args: [folder] });
     if (this.shouldFail()) throw this.popFail();
-    // Syncthing reports zero loaded patterns when the file fails to parse —
-    // every rule is discarded, not just the offending one.
+    // `ignore` is the raw .stignore LINES; `expanded` is what Syncthing
+    // actually loaded. On a parse failure the file still reads back verbatim
+    // and only `expanded` empties — the 2026-08-05 arik response was the parse
+    // error with `"expanded": []`, never an empty `ignore`. Modelling it the
+    // other way round is what let the gauge count the wrong field.
+    // Note the counts differ on purpose (2 lines -> 3 patterns): Syncthing
+    // expands a directory rule into several globs, so a gauge that reads the
+    // wrong field is visible in the number.
     return this.ignoresError
-      ? { ignore: [], expanded: [], error: this.ignoresError }
-      : { ignore: ["/secrets/", "node_modules"], expanded: ["/secrets/", "node_modules"], error: null };
+      ? { ignore: ["/secrets/", "node_modules"], expanded: [], error: this.ignoresError }
+      : {
+          ignore: ["/secrets/", "node_modules"],
+          expanded: ["/secrets/", "/secrets/**", "node_modules"],
+          error: null,
+        };
   }
   async scan(folder: string, sub?: string) {
     this.calls.push({ method: "scan", args: [folder, sub] });
@@ -325,7 +336,8 @@ describe("public + auth", () => {
   it("GET /metrics reports ignore-file health per folder and host", async () => {
     const body = await (await call("/metrics", {}, false)).text();
     expect(body).toContain('synccenter_folder_ignores_error{folder="shared",host="mac-studio"} 0');
-    expect(body).toContain('synccenter_folder_ignore_patterns{folder="shared",host="mac-studio"} 2');
+    // 3, not 2: the gauge counts LOADED patterns (`expanded`), not file lines.
+    expect(body).toContain('synccenter_folder_ignore_patterns{folder="shared",host="mac-studio"} 3');
   });
 
   // The regression that motivated the metric: one unsupported glob makes
@@ -337,6 +349,8 @@ describe("public + auth", () => {
     try {
       const body = await (await call("/metrics", {}, false)).text();
       expect(body).toContain('synccenter_folder_ignores_error{folder="shared",host="mac-studio"} 1');
+      // The file still reads back verbatim; only the loaded patterns are gone.
+      // A gauge counting `ignore` would report 2 here and look healthy.
       expect(body).toContain('synccenter_folder_ignore_patterns{folder="shared",host="mac-studio"} 0');
       // still "healthy" by every other signal — that is the whole point
       expect(body).toMatch(/synccenter_folder_state_info\{folder="shared",host="mac-studio",state="idle"\} 1/);

@@ -114,14 +114,40 @@ export function metricsHandlerFactory(
 
     const folderJobs: Array<{ folder: string; host: string }> = [];
     for (const f of folders) {
-      for (const host of Object.keys(f.paths)) {
+      // rclone members have no Syncthing daemon, so every call below would
+      // throw and emit a permanent scrape_error series for them. Same filter
+      // as `syncthingHosts()` in routes/folders.ts.
+      for (const host of Object.keys(f.paths).filter((h) => !registry.isRclone(h))) {
         folderJobs.push({ folder: f.name, host });
       }
     }
     await Promise.all(
       folderJobs.map(async ({ folder, host }) => {
+        // Resolved once, outside the settled pair: `client()` throws
+        // SYNCHRONOUSLY for an unknown/unconfigured host, which would escape
+        // allSettled and reject the whole handler — losing every metric.
+        let client;
         try {
-          const status = await registry.client(host).getFolderStatus(folder);
+          client = registry.client(host);
+        } catch (err) {
+          push(
+            `synccenter_folder_scrape_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}",reason="${escapeLabel(briefError(err))}"} 1`,
+          );
+          return;
+        }
+
+        // Status and ignores are independent, and a folder whose status reads
+        // fine can still be running with every ignore rule silently discarded,
+        // so one failing must not suppress the other. Settled in PARALLEL: run
+        // serially and two 10s client timeouts stack to 20s, past the 15s
+        // Prometheus scrape_timeout, which drops the entire scrape.
+        const [statusRes, ignoresRes] = await Promise.allSettled([
+          client.getFolderStatus(folder),
+          client.getIgnores(folder),
+        ]);
+
+        if (statusRes.status === "fulfilled") {
+          const status = statusRes.value;
           push(
             `synccenter_folder_state_info{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}",state="${escapeLabel(status.state)}"} 1`,
           );
@@ -137,26 +163,28 @@ export function metricsHandlerFactory(
           push(
             `synccenter_folder_pull_errors{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}"} ${status.pullErrors}`,
           );
-        } catch (err) {
+        } else {
           push(
-            `synccenter_folder_scrape_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}",reason="${escapeLabel(briefError(err))}"} 1`,
+            `synccenter_folder_scrape_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}",reason="${escapeLabel(briefError(statusRes.reason))}"} 1`,
           );
         }
 
-        // Scraped separately: a folder whose status reads fine can still be
-        // running with every ignore rule silently discarded, so one failing
-        // must not suppress the other.
-        try {
-          const ig = await registry.client(host).getIgnores(folder);
+        if (ignoresRes.status === "fulfilled") {
+          const ig = ignoresRes.value;
           push(
             `synccenter_folder_ignores_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}"} ${ig.error ? 1 : 0}`,
           );
+          // `expanded`, NOT `ignore`. `ignore` is the raw file content, which
+          // Syncthing reads back verbatim even when it refused to parse it —
+          // counting that reports a healthy-looking pattern count at the exact
+          // moment zero rules are in force. `expanded` is what actually loaded,
+          // which is what the HELP text above promises.
           push(
-            `synccenter_folder_ignore_patterns{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}"} ${ig.ignore?.length ?? 0}`,
+            `synccenter_folder_ignore_patterns{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}"} ${ig.expanded?.length ?? 0}`,
           );
-        } catch (err) {
+        } else {
           push(
-            `synccenter_folder_scrape_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}",reason="ignores-${escapeLabel(briefError(err))}"} 1`,
+            `synccenter_folder_scrape_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}",reason="ignores-${escapeLabel(briefError(ignoresRes.reason))}"} 1`,
           );
         }
       }),
