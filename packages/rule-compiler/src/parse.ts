@@ -49,6 +49,17 @@ function validate(raw: unknown, path: string): Ruleset {
       return s;
     });
   }
+  if (Array.isArray(raw.hard_excludes)) {
+    r.hard_excludes = raw.hard_excludes.map((x) => {
+      const s = asString(x, "hard_excludes[]", path);
+      // A "!" here would emit as "+" and land at the very top of the filter —
+      // re-including everything it matches, the exact opposite of the intent.
+      if (s.startsWith("!")) {
+        throw new CompileError(`hard_excludes[] entries must not start with '!' (got "${s}" in ${path})`);
+      }
+      return s;
+    });
+  }
 
   if (isRecord(raw.engine_overrides)) {
     const eo: Ruleset["engine_overrides"] = {};

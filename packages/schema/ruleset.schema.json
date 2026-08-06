@@ -36,6 +36,11 @@
       "description": "Negations — keep these even if a previous rule excluded them. Prefix with '!'.",
       "items": { "type": "string", "pattern": "^!" }
     },
+    "hard_excludes": {
+      "type": "array",
+      "description": "Excludes that outrank every 'includes:' negation. Both engines are first-match-wins and the emitted list is reversed, so 'includes:' is otherwise always highest-priority and a broad re-include cannot be bounded. Emitted first. Must not start with '!'.",
+      "items": { "type": "string", "minLength": 1, "not": { "pattern": "^!" } }
+    },
     "engine_overrides": {
       "type": "object",
       "additionalProperties": false,

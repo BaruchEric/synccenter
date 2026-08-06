@@ -5,6 +5,17 @@ export interface Ruleset {
   imports?: string[];
   excludes?: string[];
   includes?: string[];
+  /**
+   * Excludes that outrank every `includes:` negation.
+   *
+   * Both engines are first-match-wins and the emitters reverse this list, so
+   * `includes:` is otherwise unconditionally the highest-priority block — a
+   * broad re-include like `!/dev/**​/.github/**` cannot be bounded, and will
+   * happily reach into node_modules or any other tree an earlier rule excluded.
+   * Patterns listed here are appended last and therefore emit FIRST, so nothing
+   * can re-include them.
+   */
+  hard_excludes?: string[];
   engine_overrides?: {
     syncthing?: { extra?: string[] };
     rclone?: { extra?: string[] };

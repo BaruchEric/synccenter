@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compile, CompileError, normalizePatterns } from "../src/index.ts";
 
@@ -15,6 +17,30 @@ function compileFixture(name: string, allowDivergent = false) {
     allowDivergent,
     now: FIXED_DATE,
   });
+}
+
+/**
+ * Compile a one-off ruleset written to a REAL temp dir, never into
+ * `fixtures/rules/`. Writing a throwaway .yaml next to the committed fixtures
+ * and deleting it in `finally` leaves it behind whenever the process dies
+ * between the two (SIGKILL, a crashing assertion), and the next run's fixture
+ * glob then picks up a file git never tracked.
+ */
+function compileInTemp(name: string, yaml: string, allowDivergent = false) {
+  const dir = mkdtempSync(join(tmpdir(), "synccenter-rules-"));
+  try {
+    const path = join(dir, `${name}.yaml`);
+    writeFileSync(path, yaml);
+    return compile(path, {
+      rulesetsDir: dir,
+      importsDir: IMPORTS_DIR,
+      commitSha: "abc1234",
+      allowDivergent,
+      now: FIXED_DATE,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe("compile()", () => {
@@ -103,6 +129,64 @@ describe("compile()", () => {
         now: FIXED_DATE,
       }),
     ).toThrow(/import not cached locally/);
+  });
+
+  // Regression: a broad `includes:` negation used to be unconditionally the
+  // highest-priority block, so `!/dev/**​/.github/**` re-included .github dirs
+  // out of node_modules that `excludes:` had correctly removed — first-match-
+  // wins meant the exclude never got a look. hard_excludes must beat it.
+  it("emits hard_excludes ahead of includes in both artifacts", () => {
+    const r = compileFixture("with-hard-excludes");
+
+    for (const [engine, text, hard, inc] of [
+      ["rclone", r.rcloneFilter, "- **/node_modules/**/.*", "+ /dev/**/.github/**"],
+      ["stignore", r.stignore, "**/node_modules/**/.*", "!/dev/**/.github/**"],
+    ] as const) {
+      const lines = text.trim().split("\n");
+      const hardAt = lines.indexOf(hard);
+      const incAt = lines.indexOf(inc);
+      expect(hardAt, `${engine}: hard exclude missing`).toBeGreaterThan(-1);
+      expect(incAt, `${engine}: include missing`).toBeGreaterThan(-1);
+      expect(hardAt, `${engine}: hard exclude must win first-match`).toBeLessThan(incAt);
+    }
+  });
+
+  it("rejects a '!' in hard_excludes, which would invert it into a re-include", () => {
+    expect(() =>
+      compileInTemp("bad-hard-excludes", "name: bad-hard-excludes\nversion: 1\nhard_excludes:\n  - '!oops'\n"),
+    ).toThrow(/hard_excludes\[\] entries must not start with '!'/);
+  });
+
+  // `emitStignore` cannot rewrite every class it knows Syncthing will reject:
+  // a span crossing `]` or `\` has no literal-list form, and a very wide range
+  // beside another token is never what a ruleset meant. Passing those through
+  // is safe for rclone but still costs the ENTIRE .stignore on the Syncthing
+  // side, so compile() must refuse rather than emit a file that silently turns
+  // every ignore off.
+  it("refuses to emit a bracket class Syncthing cannot parse and the emitter cannot fix", () => {
+    expect(() =>
+      // A-_ spans 0x41-0x5F, crossing both `]` and `\`, and is followed by a-z.
+      compileInTemp("fatal-bracket", 'name: fatal-bracket\nversion: 1\nexcludes:\n  - "junk[A-_a-z]"\n'),
+    ).toThrow(/discard the ENTIRE \.stignore/);
+  });
+
+  // Not overridable. Divergence is a trade-off an operator can accept knowingly;
+  // an unparseable class is a guaranteed-broken artifact either way.
+  it("refuses even with allowDivergent, unlike an engine-divergence warning", () => {
+    expect(() =>
+      compileInTemp("fatal-bracket", 'name: fatal-bracket\nversion: 1\nexcludes:\n  - "junk[A-_a-z]"\n', true),
+    ).toThrow(CompileError);
+  });
+
+  // rclone accepts these, and rclone extras never reach .stignore, so the guard
+  // must not fire on them — otherwise a legitimate rclone-only pattern becomes
+  // uncompilable for no reason.
+  it("ignores an unparseable class in an rclone-only override", () => {
+    const r = compileInTemp(
+      "rclone-only-bracket",
+      'name: rclone-only-bracket\nversion: 1\nexcludes:\n  - "keep"\nengine_overrides:\n  rclone:\n    extra:\n      - "- junk[A-_a-z]"\n',
+    );
+    expect(r.rcloneFilter).toContain("junk[A-_a-z]");
   });
 });
 

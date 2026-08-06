@@ -54,6 +54,7 @@ function loadRulesetImport(name: string, ctx: ResolveContext): string[] {
   for (const imp of child.imports ?? []) out.push(...resolveImport(imp, childCtx));
   for (const ex of child.excludes ?? []) out.push(ex);
   for (const inc of child.includes ?? []) out.push(inc);
+  for (const hx of child.hard_excludes ?? []) out.push(hx);
   ctx.visited.delete(path);
   return out;
 }

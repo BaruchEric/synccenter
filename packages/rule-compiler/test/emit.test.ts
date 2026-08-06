@@ -37,6 +37,41 @@ describe("emitStignore bracket sanitising", () => {
     expect(stignoreBody([], ["[._]ss[a-gi-z]"])).toEqual(["[._]ss[abcdefgijklmnopqrstuvwxyz]"]);
   });
 
+  // The engine's real rule is not "at most one range" — once it has read a
+  // range's high character the next character must be `]`. So a single range
+  // with ANYTHING beside it is the same fatal parse error as two ranges.
+  it("expands a single range followed by a literal", () => {
+    expect(stignoreBody(["[a-z_]"])).toEqual(["[abcdefghijklmnopqrstuvwxyz_]"]);
+    expect(stignoreBody(["[0-9.]"])).toEqual(["[0123456789.]"]);
+  });
+
+  it("expands a literal followed by a range, which the engine misreads", () => {
+    // gobwas would otherwise read this as the four literals `_ a - z`.
+    expect(stignoreBody(["[_a-z]"])).toEqual(["[_abcdefghijklmnopqrstuvwxyz]"]);
+  });
+
+  it("moves a trailing hyphen out of range position", () => {
+    // `[a-z-]` is fatal as authored; the rewrite must not re-create `c-x`.
+    expect(stignoreBody(["[a-z-]"])).toEqual(["[abcdefghijklmnopqrstuvwxyz-]"]);
+    expect(stignoreBody(["[a-c-x0-9]"])).toEqual(["[abcx0123456789-]"]);
+  });
+
+  it("refuses to expand a span containing ] or backslash", () => {
+    // 0x41-0x5F crosses `]` and `\`. Emitting them as literals would close the
+    // class early — turning an over-wide pattern into a whole-file rejection.
+    //
+    // Passthrough is NOT "handled": the pattern is still fatal to Syncthing.
+    // Emitting stays a pure string operation, and compile() is what refuses to
+    // ship it — see "refuses to emit a bracket class Syncthing cannot parse"
+    // in compile.test.ts. Keep both: this pins the emitter's purity, that one
+    // pins that the poison never reaches an artifact.
+    expect(stignoreBody(["[A-_a-z]"])).toEqual(["[A-_a-z]"]);
+  });
+
+  it("leaves a class with no range alone even when it holds many chars", () => {
+    expect(stignoreBody(["[Cc][Oo][Dd][Ee]"])).toEqual(["[Cc][Oo][Dd][Ee]"]);
+  });
+
   it("still reverses pattern order for first-match-wins", () => {
     expect(stignoreBody(["*.log", "!keep.log"])).toEqual(["!keep.log", "*.log"]);
   });

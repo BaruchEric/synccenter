@@ -1,0 +1,9 @@
+name: with-hard-excludes
+version: 1
+excludes:
+  - "**/node_modules/"
+includes:
+  # Broad re-include: matches .github anywhere, including inside node_modules.
+  - "!/dev/**/.github/**"
+hard_excludes:
+  - "**/node_modules/**/.*"
