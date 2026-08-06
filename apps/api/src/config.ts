@@ -24,6 +24,15 @@ export interface ApiConfig {
    * Unset is correct when both share a filesystem.
    */
   rcloneFiltersDir?: string;
+  /**
+   * Directory holding the BUILT React dashboard (`apps/web/dist`), served at
+   * /app. Unset means no bundle is mounted at all, which is right for tests and
+   * for local dev, where Vite serves the SPA on its own port and proxies here.
+   *
+   * The bundle must be built with `VITE_BASE=/app/` so its asset URLs and the
+   * router basename agree with the mount point.
+   */
+  webDir?: string;
   rclone?: {
     url: string;
     username?: string;
@@ -70,6 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     port,
     dbPath,
     ...(rcloneFiltersDir ? { rcloneFiltersDir } : {}),
+    ...(env.SC_WEB_DIR ? { webDir: resolve(env.SC_WEB_DIR) } : {}),
     ...(rclone ? { rclone } : {}),
   };
 }

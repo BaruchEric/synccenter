@@ -25,7 +25,14 @@ export function App() {
         {/* Opt into the v7 behaviours now — without these flags react-router
             logs a deprecation warning per flag on every mount. */}
         <LiveProvider>
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        {/* `basename` tracks Vite's `base`, so the same bundle works at the root
+            (dev, via the Vite server) and under a prefix (deployed, where the
+            API serves it at /app alongside its own root-mounted routes). Vite
+            substitutes BASE_URL at build time; it is "/" unless base is set. */}
+        <BrowserRouter
+          basename={import.meta.env.BASE_URL}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
           <Routes>
             <Route element={<Layout />}>
               <Route index element={<Dashboard />} />

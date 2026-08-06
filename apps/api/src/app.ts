@@ -1,7 +1,17 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import { RcloneClient } from "@synccenter/adapters";
 import { version as PKG_VERSION } from "../package.json" with { type: "json" };
 import { bearerAuth } from "./auth.ts";
+
+/**
+ * Where the built React dashboard is served. Must stay in step with `VITE_BASE`
+ * in apps/web's `build:deploy` script — the bundle bakes this prefix into its
+ * asset URLs and its router basename.
+ */
+const WEB_MOUNT = "/app";
+
 import type { ApiConfig } from "./config.ts";
 import { openDb, type Db } from "./db.ts";
 import { EventBus } from "./lib/bus.ts";
@@ -96,6 +106,48 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
   // Server-rendered HTMX console — cookie session auth, scoped to /ui.
   app.get("/", (_req, res) => res.redirect("/ui/jobs"));
   app.use("/ui", uiRouter({ cfg, registry: reg, db: database, rclone: rcloneClient }));
+
+  // Built React dashboard, when a bundle is configured.
+  //
+  // Under /app, NOT /: the SPA's client routes are `folders`, `rules`, `hosts`,
+  // `conflicts` — the same names this API serves at the root for the CLI, the MCP
+  // server and Prometheus. Serving the SPA at / would make a browser GET /folders
+  // ambiguous, and whichever mount won would break the other caller.
+  //
+  // Mounted BEFORE bearerAuth deliberately: a browser cannot send an
+  // Authorization header for its first navigation, so the shell has to be
+  // fetchable unauthenticated. That is safe because the bundle contains no
+  // secrets — it prompts for a token at runtime and sends it, as a bearer
+  // header, to the protected root routes.
+  if (cfg.webDir) {
+    const webDir = cfg.webDir;
+    // `bun run build` produces a ROOT-based bundle whose asset URLs are
+    // /assets/… — served here every one of them 404s and the page renders
+    // blank, with nothing in the API log to explain it. The deployed bundle has
+    // to come from `bun run build:deploy` (VITE_BASE=/app/). Checked once at
+    // boot because a blank page is the worst possible symptom to debug.
+    try {
+      const shell = readFileSync(join(webDir, "index.html"), "utf8");
+      if (!shell.includes(`${WEB_MOUNT}/assets/`)) {
+        process.stderr.write(
+          `WARNING: ${webDir}/index.html does not reference ${WEB_MOUNT}/assets/ — ` +
+            `it was built for a different base and its assets will 404 under ${WEB_MOUNT}. ` +
+            `Rebuild with: bun run --cwd apps/web build:deploy\n`,
+        );
+      }
+    } catch {
+      process.stderr.write(`WARNING: SC_WEB_DIR=${webDir} has no readable index.html; ${WEB_MOUNT} will 404.\n`);
+    }
+    app.use(WEB_MOUNT, express.static(webDir, { index: false }));
+    // Deep links (/app/activity, /app/folders/arik/edit) are client-side routes
+    // with no file behind them, so anything that got past express.static is the
+    // shell. A RegExp rather than "/app/*" because the wildcard syntax changed
+    // in Express 5 and this survives the upgrade. Anchored on both ends so
+    // /app-not-a-route is NOT captured.
+    app.get(new RegExp(`^${WEB_MOUNT}(?:/.*)?$`), (_req, res) => {
+      res.sendFile(join(webDir, "index.html"));
+    });
+  }
 
   app.use(bearerAuth(cfg.apiToken));
 

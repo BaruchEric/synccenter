@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "//build:deploy": "Bundle for the API to serve at /app: base and router basename move to /app/, and VITE_API_BASE is emptied so requests go to the API's root-mounted routes instead of the dev server's /api proxy.",
+    "build:deploy": "VITE_BASE=/app/ VITE_API_BASE= vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },

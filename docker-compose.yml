@@ -27,6 +27,10 @@ services:
       - /share/Container/synccenter/state:/var/lib/synccenter:rw
     environment:
       SC_CONFIG_DIR: /srv/synccenter-config
+      # Serves the built React dashboard at /app. The bundle must come from
+      # `bun run --cwd apps/web build:deploy` (see scripts/deploy-web.sh); a
+      # plain `bun run build` emits root-relative asset URLs that 404 here.
+      SC_WEB_DIR: /srv/synccenter/apps/web/dist
       SC_API_TOKEN: ${SC_API_TOKEN}
       SC_DB_PATH: /var/lib/synccenter/state.sqlite
       PORT: "3000"
