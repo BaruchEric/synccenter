@@ -103,6 +103,14 @@ export function metricsHandlerFactory(
     push("# TYPE synccenter_folder_errors gauge");
     push("# HELP synccenter_folder_pull_errors Folder pull-error count.");
     push("# TYPE synccenter_folder_pull_errors gauge");
+    // The silent-failure detector. Syncthing throws away the ENTIRE ignore file
+    // when one pattern is unsupported, and the folder then syncs with no
+    // exclusions — secrets included — while every gauge above stays green.
+    // Alert on `synccenter_folder_ignores_error > 0` for any folder/host.
+    push("# HELP synccenter_folder_ignores_error 1 if the folder's ignore file failed to parse (ALL rules are then inactive).");
+    push("# TYPE synccenter_folder_ignores_error gauge");
+    push("# HELP synccenter_folder_ignore_patterns Ignore patterns currently loaded (0 with no error means an empty ignore file).");
+    push("# TYPE synccenter_folder_ignore_patterns gauge");
 
     const folderJobs: Array<{ folder: string; host: string }> = [];
     for (const f of folders) {
@@ -132,6 +140,23 @@ export function metricsHandlerFactory(
         } catch (err) {
           push(
             `synccenter_folder_scrape_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}",reason="${escapeLabel(briefError(err))}"} 1`,
+          );
+        }
+
+        // Scraped separately: a folder whose status reads fine can still be
+        // running with every ignore rule silently discarded, so one failing
+        // must not suppress the other.
+        try {
+          const ig = await registry.client(host).getIgnores(folder);
+          push(
+            `synccenter_folder_ignores_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}"} ${ig.error ? 1 : 0}`,
+          );
+          push(
+            `synccenter_folder_ignore_patterns{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}"} ${ig.ignore?.length ?? 0}`,
+          );
+        } catch (err) {
+          push(
+            `synccenter_folder_scrape_error{folder="${escapeLabel(folder)}",host="${escapeLabel(host)}",reason="ignores-${escapeLabel(briefError(err))}"} 1`,
           );
         }
       }),

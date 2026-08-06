@@ -57,6 +57,17 @@ class FakeSyncthing {
     if (this.shouldFail()) throw this.popFail();
     return { ignore: lines, expanded: lines };
   }
+  /** Set to a message to simulate Syncthing rejecting the whole ignore file. */
+  ignoresError: string | null = null;
+  async getIgnores(folder: string) {
+    this.calls.push({ method: "getIgnores", args: [folder] });
+    if (this.shouldFail()) throw this.popFail();
+    // Syncthing reports zero loaded patterns when the file fails to parse —
+    // every rule is discarded, not just the offending one.
+    return this.ignoresError
+      ? { ignore: [], expanded: [], error: this.ignoresError }
+      : { ignore: ["/secrets/", "node_modules"], expanded: ["/secrets/", "node_modules"], error: null };
+  }
   async scan(folder: string, sub?: string) {
     this.calls.push({ method: "scan", args: [folder, sub] });
     if (this.shouldFail()) throw this.popFail();
@@ -309,6 +320,32 @@ describe("public + auth", () => {
     expect(body).toContain('synccenter_host_online{host="qnap-ts453d"} 1');
     expect(body).toMatch(/synccenter_folder_state_info\{folder="shared",host="mac-studio",state="idle"\} 1/);
     expect(body).toContain("synccenter_conflicts_open 0");
+  });
+
+  it("GET /metrics reports ignore-file health per folder and host", async () => {
+    const body = await (await call("/metrics", {}, false)).text();
+    expect(body).toContain('synccenter_folder_ignores_error{folder="shared",host="mac-studio"} 0');
+    expect(body).toContain('synccenter_folder_ignore_patterns{folder="shared",host="mac-studio"} 2');
+  });
+
+  // The regression that motivated the metric: one unsupported glob makes
+  // Syncthing discard EVERY rule, so the folder syncs with no exclusions at all
+  // — /secrets/ included — while state, errors and need all still read healthy.
+  // The gauge must go to 1 even though nothing else changes.
+  it("GET /metrics flags a folder whose ignore file failed to parse", async () => {
+    macFake.ignoresError = 'invalid pattern "[a-gi-z]": unexpected end of input';
+    try {
+      const body = await (await call("/metrics", {}, false)).text();
+      expect(body).toContain('synccenter_folder_ignores_error{folder="shared",host="mac-studio"} 1');
+      expect(body).toContain('synccenter_folder_ignore_patterns{folder="shared",host="mac-studio"} 0');
+      // still "healthy" by every other signal — that is the whole point
+      expect(body).toMatch(/synccenter_folder_state_info\{folder="shared",host="mac-studio",state="idle"\} 1/);
+      expect(body).toContain('synccenter_folder_errors{folder="shared",host="mac-studio"} 0');
+      // the other host is unaffected
+      expect(body).toContain('synccenter_folder_ignores_error{folder="shared",host="qnap-ts453d"} 0');
+    } finally {
+      macFake.ignoresError = null;
+    }
   });
 });
 

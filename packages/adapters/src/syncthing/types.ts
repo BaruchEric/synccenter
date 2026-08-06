@@ -67,6 +67,22 @@ export interface SyncthingFolderStatus {
 export interface SyncthingIgnores {
   ignore: string[];
   expanded: string[];
+  /**
+   * Syncthing's parse result for the ignore file as a WHOLE — null when it
+   * loaded, a message when it did not.
+   *
+   * This is not a per-pattern warning. One unsupported glob makes Syncthing
+   * discard EVERY rule in the file, and the folder then syncs with no ignores
+   * at all. On 2026-08-05 a single multi-range bracket class did exactly that
+   * on both arik members, so `/secrets/` — plaintext credentials the ruleset
+   * exists to keep out of the cloud — was replicating, while folder state,
+   * error counts and need counts all stayed green. Nothing in the codebase
+   * noticed because this field was missing from the type.
+   *
+   * Always check it after setIgnores, and alert on it (see the
+   * synccenter_folder_ignores_error metric).
+   */
+  error?: string | null;
 }
 
 export interface SyncthingEvent {
