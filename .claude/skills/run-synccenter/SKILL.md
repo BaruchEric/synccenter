@@ -83,9 +83,19 @@ all smoke checks passed
 
 ### Live progress: `--fake-rclone`
 
-The real rcd sits on the QNAP's compose-internal network with no published
-port, so `SC_RCLONE_URL` is unset locally and every run/progress endpoint 503s.
+The real rcd **is** published, but only on the NAS's own loopback
+(`docker port rclone-rcd` → `5572/tcp -> 127.0.0.1:5572`), and QTS ships
+`AllowTcpForwarding no`, so `ssh -L` to it connects and then resets. Do **not**
+hand-edit `/etc/config/ssh/sshd_config` to change that: QTS regenerates the file
+from Control Panel settings, so the edit does not stick, and a failed sshd
+restart locks you out of the only channel that can repair it — restoring SSH then
+needs the QTS web UI (Control Panel → Network & File Services → Telnet / SSH).
+So `SC_RCLONE_URL` stays unset locally and every run/progress endpoint 503s.
 `up --fake-rclone` starts **`fake-rcd.mjs`** on :5572 and points the API at it.
+
+Real rclone progress instead comes from the deployed API, which reaches the rcd
+over the compose network. Serve the dashboard there with
+`scripts/deploy-web.sh` and use `https://sync.beric.ca/app/activity`.
 
 It is not just a stub — it reproduces the two behaviours that make bisync
 progress awkward:
