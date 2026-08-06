@@ -138,7 +138,18 @@ export interface FolderState {
     host: string;
     ok: boolean;
     error?: string;
-    status?: { state: string; globalBytes: number; localBytes: number; needFiles: number; errors: number };
+    /** Passed through verbatim from Syncthing's `db/status`; this is the subset we read. */
+    status?: {
+      state: string;
+      globalBytes: number;
+      localBytes: number;
+      inSyncBytes: number;
+      needBytes: number;
+      needFiles: number;
+      errors: number;
+      /** When the folder entered `state`. Absent on older Syncthing builds. */
+      stateChanged?: string;
+    };
   }>;
 }
 export interface ApplyResult {

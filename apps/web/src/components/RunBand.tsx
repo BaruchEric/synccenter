@@ -1,14 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type RunView } from "@/lib/api";
 import { bytes, duration, elapsed, rate, tailPath } from "@/lib/format";
+import { Spine } from "@/components/Spine";
 
 /**
  * A bisync in flight, drawn at `now` on the activity timeline.
  *
- * The timeline already reads top-to-bottom as time passing, so the spine itself
- * carries the progress: an amber column that fills downward as the job
- * advances. A horizontal bar bolted next to the axis would be the same
- * information in a second, unrelated coordinate system.
+ * The spine carries the progress (see `Spine`), in amber: this is a run the
+ * dashboard started and can stop, as opposed to the blue `SyncBand` for
+ * Syncthing moving on its own.
  *
  * bisync walks both trees before it moves a byte — minutes, on a large folder —
  * and during that stretch there is no denominator to be a percentage of. Rather
@@ -32,7 +32,7 @@ export function RunBand({ run, now }: { run: RunView; now: Date }) {
           {elapsed(run.started_at, now)}
         </span>
 
-        <Meter fraction={run.fraction} checking={checking} />
+        <Spine fraction={run.fraction} indeterminate={checking} tone="signal" />
 
         <div className="min-w-0 flex-1 pb-3 pt-0.5">
           <div className="flex flex-wrap items-baseline gap-x-2">
@@ -108,24 +108,6 @@ export function RunBand({ run, now }: { run: RunView; now: Date }) {
         </div>
       </div>
     </li>
-  );
-}
-
-/** The spine segment for this run, doubling as the meter. */
-function Meter({ fraction, checking }: { fraction: number | null; checking: boolean }) {
-  return (
-    <span className="relative flex w-2 shrink-0 justify-center" aria-hidden>
-      <span className="relative w-0.5 overflow-hidden rounded-full bg-rule">
-        {checking ? (
-          <span className="sc-scan absolute inset-x-0 top-0 h-1/4 rounded-full bg-signal" />
-        ) : (
-          <span
-            className="sc-meter-fill absolute inset-x-0 top-0 h-full origin-top bg-signal"
-            style={{ transform: `scaleY(${fraction ?? 0})` }}
-          />
-        )}
-      </span>
-    </span>
   );
 }
 

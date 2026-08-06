@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import {
   api,
   type ApplyHistory,
@@ -11,6 +11,7 @@ import {
 import { nextRuns, relative } from "@/lib/cron";
 import { FolderActions } from "@/components/FolderActions";
 import { RunBand } from "@/components/RunBand";
+import { SyncBand, type HostStatus } from "@/components/SyncBand";
 import { useLive } from "@/lib/live";
 import { LiveLamp } from "@/components/LiveLamp";
 
@@ -47,6 +48,27 @@ export function Activity() {
     retry: false,
   });
   const folders = useQuery({ queryKey: ["folders"], queryFn: () => api.get<FoldersList>("/folders") });
+  const names = useMemo(() => folders.data?.folders ?? [], [folders.data]);
+
+  // Hoisted out of the Right-now rows so the timeline can read the same poll:
+  // a folder Syncthing is working on has to appear at `now`, not only in the
+  // panel above it. One query per folder, one observer each.
+  const states = useQueries({
+    queries: names.map((n) => ({
+      queryKey: ["folder-state", n],
+      queryFn: () => api.get<FolderState>(`/folders/${encodeURIComponent(n)}/state`),
+      refetchInterval: 10_000,
+      retry: false,
+    })),
+  });
+
+  // Idle is the resting state and paused is deliberate; neither is work in
+  // flight. Everything else — scanning, syncing, cleaning, error — is.
+  const busy = names.flatMap((name, i) =>
+    (states[i]?.data?.perHost ?? [])
+      .filter((h) => h.ok && h.status && h.status.state !== "idle" && h.status.state !== "paused")
+      .map((h) => ({ folder: name, host: h.host, status: h.status as HostStatus })),
+  );
 
   const upcoming = useMemo<Event[]>(() => {
     const jobs = schedule.data?.jobs ?? [];
@@ -98,7 +120,8 @@ export function Activity() {
 
         {/* Only folders the planner emits a bisync leg for can be "Run". */}
         <LegStrip
-          names={folders.data?.folders ?? []}
+          names={names}
+          states={states}
           cloudFolders={new Set((schedule.data?.jobs ?? []).map((j) => j.folder))}
         />
 
@@ -129,6 +152,16 @@ export function Activity() {
                 <RunBand key={run.id} run={run} now={now} />
               ))}
 
+              {busy.map((b) => (
+                <SyncBand
+                  key={`${b.folder}@${b.host}`}
+                  folder={b.folder}
+                  host={b.host}
+                  status={b.status}
+                  now={now}
+                />
+              ))}
+
               {past.map((e) => (
                 <Row key={`h-${e.row!.id}`} event={e} now={now} selected={selected} onSelect={setSelected} />
               ))}
@@ -148,8 +181,9 @@ export function Activity() {
               now line read as "the 04:00 run never happened". */}
           {!loading && (schedule.data?.jobs.length ?? 0) > 0 && (
             <p className="mt-6 border-l-2 border-rule py-2 pl-3 text-xs text-dim">
-              Scheduled runs execute on the anchor host directly. They finish without reporting
-              progress here — only runs started from this dashboard appear at the now line.
+              The now line carries bisync runs started from this dashboard (amber) and whatever
+              Syncthing is doing on its own (blue). Scheduled runs are neither: they execute on the
+              anchor host directly and finish without reporting progress here.
             </p>
           )}
 
@@ -255,8 +289,18 @@ function Row({
   );
 }
 
+type StateQuery = UseQueryResult<FolderState, Error>;
+
 /** Live per-folder state: one line per folder, one cell per member. */
-function LegStrip({ names, cloudFolders }: { names: string[]; cloudFolders: Set<string> }) {
+function LegStrip({
+  names,
+  states,
+  cloudFolders,
+}: {
+  names: string[];
+  states: StateQuery[];
+  cloudFolders: Set<string>;
+}) {
   if (names.length === 0) return null;
   return (
     <section aria-label="Live folder state" className="rounded-lg border border-rule bg-panel">
@@ -264,21 +308,15 @@ function LegStrip({ names, cloudFolders }: { names: string[]; cloudFolders: Set<
         Right now
       </h2>
       <ul className="divide-y divide-rule">
-        {names.map((n) => (
-          <Leg key={n} name={n} hasCloud={cloudFolders.has(n)} />
+        {names.map((n, i) => (
+          <Leg key={n} name={n} q={states[i]} hasCloud={cloudFolders.has(n)} />
         ))}
       </ul>
     </section>
   );
 }
 
-function Leg({ name, hasCloud }: { name: string; hasCloud: boolean }) {
-  const q = useQuery({
-    queryKey: ["folder-state", name],
-    queryFn: () => api.get<FolderState>(`/folders/${encodeURIComponent(name)}/state`),
-    refetchInterval: 10_000,
-    retry: false,
-  });
+function Leg({ name, q, hasCloud }: { name: string; q?: StateQuery; hasCloud: boolean }) {
   const manifest = useQuery({
     queryKey: ["folder", name],
     queryFn: () => api.get<FolderManifest & { paths?: Record<string, string> }>(
@@ -286,7 +324,7 @@ function Leg({ name, hasCloud }: { name: string; hasCloud: boolean }) {
     ),
     retry: false,
   });
-  const paused = q.data?.perHost.some((h) => h.ok && h.status?.state === "paused");
+  const paused = q?.data?.perHost.some((h) => h.ok && h.status?.state === "paused");
   const disabled = manifest.data?.enabled === false;
 
   return (
@@ -296,9 +334,9 @@ function Leg({ name, hasCloud }: { name: string; hasCloud: boolean }) {
         <span className="font-mono text-sm text-slate-200">{name}</span>
         {disabled && <span className="text-[10px] uppercase tracking-wider text-dim">off</span>}
       </span>
-      {q.isLoading && <span className="text-xs text-dim">checking…</span>}
-      {q.isError && <span className="text-xs text-dim">state unavailable</span>}
-      {q.data?.perHost.map((h) => {
+      {q?.isLoading && <span className="text-xs text-dim">checking…</span>}
+      {q?.isError && <span className="text-xs text-dim">state unavailable</span>}
+      {q?.data?.perHost.map((h) => {
         const host = typeof h.host === "string" ? h.host : (h.host as { name?: string })?.name;
         const state = h.ok ? h.status?.state : "unreachable";
         const need = h.status?.needFiles ?? 0;
