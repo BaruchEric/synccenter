@@ -14,7 +14,7 @@ describe("renderCrontab", () => {
       folder: "example-code-projects",
       cron: "*/15 * * * *",
       filtersFile: "/share/synccenter-config/compiled/dev-monorepo/filter.rclone",
-      command: 'docker exec rclone-rcd rclone --config=/config/rclone.conf bisync /share/Sync/code gdrive:sync/code --filters-file=/share/synccenter-config/compiled/dev-monorepo/filter.rclone --resilient --recover --max-lock=2m --conflict-resolve=newer --conflict-loser=pathrename',
+      command: 'docker exec rclone-rcd rclone --config=/config/rclone.conf bisync /share/Sync/code gdrive:sync/code --filters-file=/share/synccenter-config/compiled/dev-monorepo/filter.rclone --resilient --recover --max-lock=2m --conflict-resolve=newer --conflict-loser=pathname',
     }];
     const out = renderCrontab(plans);
     if (process.env["BUN_UPDATE_GOLDEN"] === "1" || !existsSync(GOLDEN)) {

@@ -12,12 +12,12 @@ export function mapPolicy(policy: ConflictPolicy | undefined): PolicyMapping {
   switch (p) {
     case "newer":
       return {
-        rcloneFlags: ["--conflict-resolve=newer", "--conflict-loser=pathrename"],
+        rcloneFlags: ["--conflict-resolve=newer", "--conflict-loser=pathname"],
         syncthingMaxConflicts: -1,
       };
     case "older":
       return {
-        rcloneFlags: ["--conflict-resolve=older", "--conflict-loser=pathrename"],
+        rcloneFlags: ["--conflict-resolve=older", "--conflict-loser=pathname"],
         syncthingMaxConflicts: -1,
       };
     case "keep-both":
