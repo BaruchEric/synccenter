@@ -209,12 +209,21 @@ async function buildAdapterPool(cmd: Command): Promise<AdapterPool> {
 async function collectLiveState(
   p: ApplyPlan,
   pool: AdapterPool,
-): Promise<Record<string, { folder: PlannerFolderConfig | null; ignores: string[] | null }>> {
-  const out: Record<string, { folder: PlannerFolderConfig | null; ignores: string[] | null }> = {};
+): Promise<
+  Record<
+    string,
+    { folder: PlannerFolderConfig | null; ignores: string[] | null; ignoresError: string | null }
+  >
+> {
+  const out: Record<
+    string,
+    { folder: PlannerFolderConfig | null; ignores: string[] | null; ignoresError: string | null }
+  > = {};
   for (const host of Object.keys(p.perHost)) {
     const c = pool.syncthing(host);
     let folder: PlannerFolderConfig | null = null;
     let ignores: string[] | null = null;
+    let ignoresError: string | null = null;
     try {
       const live = await c.getFolder(p.folder);
       folder = {
@@ -235,11 +244,17 @@ async function collectLiveState(
       try {
         const ig = await c.getIgnores(p.folder);
         ignores = ig.ignore ?? [];
-      } catch {
+        // Syncthing hands back the file it stored even when it discarded every
+        // pattern in it, so the line comparison downstream reports a clean
+        // match on a folder running with no exclusions. This is the only field
+        // that says the rules are in force.
+        ignoresError = ig.error ?? null;
+      } catch (err) {
         ignores = [];
+        ignoresError = `could not read ignores: ${(err as Error).message ?? String(err)}`;
       }
     }
-    out[host] = { folder, ignores };
+    out[host] = { folder, ignores, ignoresError };
   }
   return out;
 }

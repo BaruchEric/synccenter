@@ -337,7 +337,10 @@ function Leg({ name, q, hasCloud }: { name: string; q?: StateQuery; hasCloud: bo
       {q?.isLoading && <span className="text-xs text-dim">checking…</span>}
       {q?.isError && <span className="text-xs text-dim">state unavailable</span>}
       {q?.data?.perHost.map((h) => {
-        const host = typeof h.host === "string" ? h.host : (h.host as { name?: string })?.name;
+        // `perHost` is keyed off `Object.keys(manifest.paths)` server-side, so
+        // `host` is always a string. The old defensive object-unwrap here
+        // implied a hazard the SyncBand rows above do not guard against.
+        const host = h.host;
         const state = h.ok ? h.status?.state : "unreachable";
         const need = h.status?.needFiles ?? 0;
         return (

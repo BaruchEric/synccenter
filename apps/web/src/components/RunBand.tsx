@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type RunView } from "@/lib/api";
 import { bytes, duration, elapsed, rate, tailPath } from "@/lib/format";
 import { Spine } from "@/components/Spine";
+import { Tag } from "@/components/Tag";
 
 /**
  * A bisync in flight, drawn at `now` on the activity timeline.
@@ -108,13 +109,5 @@ export function RunBand({ run, now }: { run: RunView; now: Date }) {
         </div>
       </div>
     </li>
-  );
-}
-
-function Tag({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded border border-rule px-1 font-mono text-[10px] uppercase tracking-wider text-dim">
-      {children}
-    </span>
   );
 }

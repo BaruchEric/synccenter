@@ -1,8 +1,24 @@
 import { type FolderState } from "@/lib/api";
-import { bytes, elapsed } from "@/lib/format";
+import { bytes, duration } from "@/lib/format";
 import { Spine } from "@/components/Spine";
+import { Tag } from "@/components/Tag";
 
 export type HostStatus = NonNullable<FolderState["perHost"][number]["status"]>;
+
+/**
+ * States where Syncthing is working through a tree or queued to, and there is
+ * no denominator for the work itself. The `-waiting` states matter as much as
+ * the active ones: a folder queued behind another folder's sync is not making
+ * progress, and showing it a determinate meter would assert that it is.
+ */
+const WALKING = new Set([
+  "scanning",
+  "scan-waiting",
+  "cleaning",
+  "cleaning-waiting",
+  "sync-preparing",
+  "sync-waiting",
+]);
 
 /**
  * A Syncthing member doing work, drawn at `now` on the activity timeline.
@@ -19,8 +35,6 @@ export type HostStatus = NonNullable<FolderState["perHost"][number]["status"]>;
  * fraction — of the tree, not of this pass, which is why it is labelled
  * "in sync" rather than given as bare progress.
  */
-const WALKING = /^(scanning|scan-waiting|cleaning|sync-preparing)$/;
-
 export function SyncBand({
   folder,
   host,
@@ -33,50 +47,49 @@ export function SyncBand({
   now: Date;
 }) {
   const failed = status.state === "error";
-  const walking = WALKING.test(status.state);
+  const walking = !failed && WALKING.has(status.state);
+  const tone = failed ? "fail" : "run";
+  // Whole literals so Tailwind's scanner sees them.
+  const text = failed ? "text-fail" : "text-run";
   // A host that answered with a partial status would otherwise print "NaN%".
+  // `inSyncBytes` is absent from the adapter's own status type, so it really
+  // can arrive undefined and make this NaN.
   const ratio = status.inSyncBytes / status.globalBytes;
-  const fraction = status.globalBytes > 0 && Number.isFinite(ratio) ? Math.min(1, ratio) : null;
-  const pct = fraction == null ? null : Math.round(fraction * 100);
+  const fraction =
+    failed || !(status.globalBytes > 0) || !Number.isFinite(ratio) ? null : Math.min(1, ratio);
   const behind = status.needFiles ?? 0;
 
   // How long it has been in this state, which is the closest thing Syncthing
-  // gives us to a start time. Older builds omit it, and an unparseable date
-  // would render as NaN:NaN, so fall back to the bare `now` label.
-  const since =
-    status.stateChanged && Number.isFinite(Date.parse(status.stateChanged))
-      ? sinceLabel(status.stateChanged, now)
-      : "now";
+  // gives us to a start time. Parsed once, and required to be POSITIVE rather
+  // than merely finite: `stateChanged` is a Go time.Time, so an unset one
+  // serialises as "0001-01-01T00:00:00Z", which parses to a large negative
+  // number and would render as "739833d 12h" in a 5rem column.
+  const changedAt = status.stateChanged ? Date.parse(status.stateChanged) : NaN;
+  const changedOk = changedAt > 0;
+  const since = changedOk ? sinceLabel(changedAt, now) : "now";
 
   return (
     <li className="relative">
       <div className="flex items-stretch gap-3 py-1">
         <span
-          className={`w-20 shrink-0 pt-1 text-right font-mono text-xs tabular-nums ${
-            failed ? "text-fail" : "text-run"
-          }`}
-          title={
-            status.stateChanged
-              ? `${status.state} since ${new Date(status.stateChanged).toLocaleString()}`
-              : undefined
-          }
+          className={`w-20 shrink-0 pt-1 text-right font-mono text-xs tabular-nums ${text}`}
+          // Gated on the same check as the label: a truthiness-only test prints
+          // "Invalid Date" in the tooltip while the cell reads "now".
+          title={changedOk ? `${status.state} since ${new Date(changedAt).toLocaleString()}` : undefined}
         >
           {since}
         </span>
 
-        <Spine
-          fraction={failed ? null : fraction}
-          indeterminate={!failed && walking}
-          tone={failed ? "fail" : "run"}
-        />
+        {/* A folder that has stopped is drawn as a FULL red column, not an
+            empty one: `scaleY(0)` renders nothing at all, which is pixel
+            identical to a healthy folder sitting at 0%. */}
+        <Spine fraction={failed ? 1 : fraction} indeterminate={walking} tone={tone} />
 
         <div className="min-w-0 flex-1 pb-3 pt-0.5">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="font-mono text-sm text-slate-100">{folder}</span>
             <span className="font-mono text-xs text-dim">on {host}</span>
-            <span className={`font-mono text-xs ${failed ? "text-fail" : "text-run"}`}>
-              {status.state}
-            </span>
+            <span className={`font-mono text-xs ${text}`}>{status.state}</span>
             <Tag>syncthing</Tag>
           </div>
 
@@ -87,10 +100,7 @@ export function SyncBand({
             {`${folder} on ${host}: ${status.state}`}
           </p>
 
-          <div
-            aria-live="off"
-            className="mt-1 flex flex-wrap items-baseline gap-x-3 font-mono text-xs tabular-nums text-slate-300"
-          >
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 font-mono text-xs tabular-nums text-slate-300">
             {walking ? (
               behind > 0 ? (
                 <>
@@ -103,7 +113,9 @@ export function SyncBand({
               )
             ) : (
               <>
-                <span className="text-run">{pct == null ? "—" : `${pct}%`}</span>
+                <span className={text}>
+                  {fraction == null ? "—" : `${Math.round(fraction * 100)}%`}
+                </span>
                 <span>
                   {bytes(status.inSyncBytes)} <span className="text-dim">of</span>{" "}
                   {bytes(status.globalBytes)} <span className="text-dim">in sync</span>
@@ -134,17 +146,9 @@ export function SyncBand({
  * next to `06:32` reads as a clock time, not a duration — so anything past an
  * hour gets the coarse form instead. The exact instant stays in the title.
  */
-function sinceLabel(iso: string, now: Date): string {
-  const s = Math.max(0, Math.floor((now.getTime() - new Date(iso).getTime()) / 1000));
-  if (s < 3600) return elapsed(iso, now);
+function sinceLabel(changedAt: number, now: Date): string {
+  const s = Math.max(0, Math.floor((now.getTime() - changedAt) / 1000));
+  if (s < 3600) return duration(s);
   const h = Math.floor(s / 3600);
   return h < 24 ? `${h}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
-}
-
-function Tag({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded border border-rule px-1 font-mono text-[10px] uppercase tracking-wider text-dim">
-      {children}
-    </span>
-  );
 }
