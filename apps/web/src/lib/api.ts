@@ -130,6 +130,13 @@ export interface HostManifest {
   remote?: string;
   os?: string;
   role?: string;
+  /**
+   * Syncthing serves its GUI and its REST API off one listener, so `api_url`
+   * is also the address of the web UI. Written from the API's vantage point,
+   * not the browser's: `qnap-ts453d` carries a LAN address, `mac-studio` a
+   * loopback one that only reaches that host's daemon from that host.
+   */
+  syncthing?: { api_url?: string };
 }
 export interface ConflictsList { conflicts: Array<{ id: number; folder: string; path: string; detected_at: string }> }
 export interface FolderState {

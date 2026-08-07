@@ -16,6 +16,7 @@ Versions group commits by phase; see `git log` for individual commits.
 - `POST /folders` JSON endpoint — validates against folder.schema.json + config-repo coherence (ruleset/hosts exist, name free) and writes canonical YAML via the state-importer emitter. 201/400/409 with coded errors.
 - `validateFolderManifest()` export in `@synccenter/apply-planner` for in-memory schema validation.
 - Form pickers: per-host path completion via each host's Syncthing `/rest/system/browse` (new `SyncthingClient.browse()`), rclone remote-name + remote-path completion via `config/listremotes` and a new `RcloneClient.listDirs()` (`operations/list`, dirsOnly), and a cron preset menu with a live plain-English readout of the bisync schedule. All degrade to silent-empty when the backing daemon is unreachable.
+- Hosts page links each Syncthing host to its web GUI — the daemon serves the GUI and the REST API off one listener, so the manifest's `syncthing.api_url` is already the address. Labelled with the host:port rather than a generic "open GUI": `api_url` is recorded from the API's vantage point, so `qnap-ts453d` carries a LAN address while `mac-studio` carries `127.0.0.1`, which only reaches that daemon from that machine.
 - Top-level README + this changelog.
 
 ### Changed
