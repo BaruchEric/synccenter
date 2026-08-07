@@ -99,10 +99,70 @@ describe("SPA mount at /app", () => {
     expect(r.headers.get("content-type")).toContain("json");
   });
 
-  it("keeps the HTMX console and public routes reachable", async () => {
+  it("keeps the public routes reachable", async () => {
     expect((await fetch(`${withWeb.url}/health`)).status).toBe(200);
-    const ui = await fetch(`${withWeb.url}/ui/login`);
-    expect(ui.status).toBe(200);
-    expect(ui.headers.get("content-type")).toContain("html");
+  });
+});
+
+// `/ui/jobs` and `/app/folders` were two views of the same folder manifests.
+// With a bundle configured the React one is the only one, and /ui exists purely
+// to carry old bookmarks across.
+describe("the HTMX console retires into /app when a bundle is configured", () => {
+  const go = (path: string, init: RequestInit = {}) =>
+    fetch(`${withWeb.url}${path}`, { redirect: "manual", ...init });
+
+  it("sends the old front door to the dashboard", async () => {
+    const r = await go("/");
+    expect(r.status).toBe(302);
+    expect(r.headers.get("location")).toBe("/app/");
+  });
+
+  it("maps each console route onto its React equivalent", async () => {
+    const cases: Array<[string, string]> = [
+      ["/ui/jobs", "/app/folders"],
+      ["/ui/jobs/new", "/app/folders/new"],
+      ["/ui/jobs/media-photos", "/app/folders/media-photos"],
+      // plan/apply/state all live on the React detail page now.
+      ["/ui/jobs/media-photos/state", "/app/folders/media-photos"],
+      // No equivalent page — the dashboard root is the honest landing spot.
+      ["/ui/login", "/app/"],
+      ["/ui/frag/host-row", "/app/"],
+      ["/ui", "/app/"],
+    ];
+    for (const [from, to] of cases) {
+      const r = await go(from);
+      expect(r.status, from).toBe(302);
+      expect(r.headers.get("location"), from).toBe(to);
+    }
+  });
+
+  // A job name reaches the redirect straight from the URL; anything NAME_RE
+  // rejects must not reach a Location header.
+  it("refuses to reflect a name that could not have been created", async () => {
+    for (const bad of ["/ui/jobs/Bad_Name", "/ui/jobs/bad%0aname", "/ui/jobs/..%2Fetc"]) {
+      const r = await go(bad);
+      expect(r.status, bad).toBe(302);
+      expect(r.headers.get("location"), bad).toBe("/app/");
+    }
+  });
+
+  // A stale tab still has the old form open; 303 makes the browser re-issue as
+  // a GET instead of replaying the body somewhere that cannot read it.
+  it("turns a POST from a stale tab into a GET", async () => {
+    const r = await go("/ui/jobs", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "name=whatever",
+    });
+    expect(r.status).toBe(303);
+    expect(r.headers.get("location")).toBe("/app/");
+  });
+
+  it("leaves the console mounted when there is no bundle to redirect to", async () => {
+    const login = await fetch(`${withoutWeb.url}/ui/login`, { redirect: "manual" });
+    expect(login.status).toBe(200);
+    expect(login.headers.get("content-type")).toContain("html");
+    const root = await fetch(`${withoutWeb.url}/`, { redirect: "manual" });
+    expect(root.headers.get("location")).toBe("/ui/jobs");
   });
 });

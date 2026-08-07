@@ -20,7 +20,7 @@ Versions group commits by phase; see `git log` for individual commits.
 
 ### Changed
 - `POST /folders/:name/apply` route refactored onto a shared `applyFolder` service (used by both the JSON API and the UI); dry runs now record `result: dry-run` in apply_history instead of `ok`.
-- `GET /` now redirects to `/ui/jobs`.
+- The HTMX console retires into the React dashboard wherever a bundle is configured. `/ui/jobs` and `/app/folders` had always listed the same folder manifests under two names, so with `SC_WEB_DIR` set `GET /` redirects to `/app/` and every `/ui/*` route forwards to its React equivalent (`/ui/jobs` → `/app/folders`, `/ui/jobs/new` → `/app/folders/new`, `/ui/jobs/:name` and its `plan`/`apply`/`state` children → `/app/folders/:name`, everything else → `/app/`). Both consoles authenticate against the same `SC_API_TOKEN`, so an open session costs one re-entry rather than a new credential. With no bundle configured the console stays mounted unchanged and `GET /` still redirects to `/ui/jobs` — it is the fallback UI for dev and the test suite. **Not carried across:** the console's host/remote path picker (`/ui/frag/browse-host`), which was an htmx HTML fragment with no JSON equivalent; the React folder editor still takes paths as text.
 - docker-compose: syncthing and rclone-rcd now bind the whole `/share` at `/share` (host-path parity) instead of `/share/Sync` at `/Sync`, so folder-manifest paths anywhere under `/share` resolve inside both containers. Note: this gives both daemons read-write access to the entire share tree. Applied to the live QNAP deploy 2026-07-16.
 
 ## [phase-5]

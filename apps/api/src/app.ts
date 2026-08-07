@@ -28,6 +28,7 @@ import { eventsRouter } from "./routes/events.ts";
 import { scheduleRouter } from "./routes/schedule.ts";
 import { stateRouter } from "./routes/state.ts";
 import { systemRouter } from "./routes/system.ts";
+import { legacyUiRedirect } from "./ui/legacy-redirect.ts";
 import { uiRouter } from "./ui/router.ts";
 import { HostRegistry } from "./registry.ts";
 
@@ -103,9 +104,18 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
   });
   app.get("/metrics", metricsHandlerFactory(cfg, reg, database));
 
-  // Server-rendered HTMX console — cookie session auth, scoped to /ui.
-  app.get("/", (_req, res) => res.redirect("/ui/jobs"));
-  app.use("/ui", uiRouter({ cfg, registry: reg, db: database, rclone: rcloneClient }));
+  // One console, not two. `/ui/jobs` and `/app/folders` list the same folder
+  // manifests under two names; when a bundle is configured the React dashboard
+  // is the front door and /ui only forwards old bookmarks into it. With no
+  // bundle the server-rendered HTMX console (cookie session auth, scoped to
+  // /ui) is still the entire UI, so it stays mounted exactly as it was.
+  if (cfg.webDir) {
+    app.get("/", (_req, res) => res.redirect(302, `${WEB_MOUNT}/`));
+    app.use("/ui", legacyUiRedirect(WEB_MOUNT));
+  } else {
+    app.get("/", (_req, res) => res.redirect("/ui/jobs"));
+    app.use("/ui", uiRouter({ cfg, registry: reg, db: database, rclone: rcloneClient }));
+  }
 
   // Built React dashboard, when a bundle is configured.
   //
