@@ -320,3 +320,55 @@ describe("firesBetween", () => {
     expect(firesBetween("not a cron", new Date(), new Date(Date.now() + 60_000))).toEqual([]);
   });
 });
+
+describe("GET /schedule degradation", () => {
+  it("serves windows even when bisync job planning fails (no sops / no secrets)", async () => {
+    // A folder with an rclone member forces the jobs loop through the secrets
+    // resolver, which cannot succeed in this fixture — no sops, no enc files.
+    writeFileSync(
+      join(cfg.hostsDir, "gdrive.yaml"),
+      ["name: gdrive", "engine: rclone", "remote: gdrive"].join("\n"),
+    );
+    writeFileSync(
+      join(cfg.foldersDir, "cloudy.yaml"),
+      [
+        "name: cloudy",
+        "ruleset: base-binaries",
+        "type: send-receive",
+        'bisync: { schedule: "0 4 * * *" }',
+        "paths:",
+        "  qnap-ts453d: /share/Sync/cloudy",
+        "  gdrive: sync/cloudy",
+      ].join("\n"),
+    );
+    try {
+      const { buildApp } = await import("../src/app.ts");
+      const clients = new Map<string, SyncthingClient>();
+      clients.set("qnap-ts453d", qnap as unknown as SyncthingClient);
+      clients.set("mac-studio", mac as unknown as SyncthingClient);
+      const registry = new HostRegistry({ cfg, clients });
+      const built = buildApp({ cfg, registry, rclone: null });
+      const server = await new Promise<import("node:http").Server>((resolve) => {
+        const s = built.app.listen(0, () => resolve(s));
+      });
+      const port = (server.address() as import("node:net").AddressInfo).port;
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/schedule`, {
+          headers: { Authorization: `Bearer ${TOKEN}` },
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { jobs: unknown[]; windows: unknown[]; jobsError?: string };
+        expect(body.windows).toEqual([
+          { folder: "held", host: "qnap-ts453d", cron: "0 * * * *", maxWindowMinutes: 45 },
+        ]);
+        expect(body.jobs).toEqual([]);
+        expect(typeof body.jobsError).toBe("string");
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    } finally {
+      rmSync(join(cfg.hostsDir, "gdrive.yaml"), { force: true });
+      rmSync(join(cfg.foldersDir, "cloudy.yaml"), { force: true });
+    }
+  });
+});

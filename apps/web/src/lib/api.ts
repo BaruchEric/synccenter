@@ -86,6 +86,8 @@ export interface ScheduleList {
     cron: string;
     maxWindowMinutes: number;
   }>;
+  /** Set when the bisync jobs could not be planned (e.g. no sops on the server); windows are still real. */
+  jobsError?: string;
 }
 /** What a bisync is doing right now, as served by /runs and pushed over /events. */
 export type RunPhase = "starting" | "checking" | "transferring" | "finished";

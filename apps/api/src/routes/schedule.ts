@@ -18,6 +18,22 @@ export function scheduleRouter(cfg: ApiConfig, engine: SyncWindowEngine): Router
 
   /** The same SchedulePlan the crontab is rendered from, as JSON for the UI. */
   router.get("/schedule", (_req, res) => {
+    // Syncthing sync windows are scheduled work too — the cron-driven kind the
+    // engine opens itself, as opposed to the crontab-rendered rclone legs.
+    // Computed first and never behind the secrets resolver: the bisync jobs
+    // below shell out to sops for device IDs, and the deployed API container
+    // has no sops — that must not blank the windows the engine WILL run.
+    let windows: Array<{ folder: string; host: string; cron: string; maxWindowMinutes: number }>;
+    try {
+      windows = engine
+        .syncJobs()
+        .filter((j) => j.mode === "scheduled" && j.cron)
+        .map((j) => ({ folder: j.folder, host: j.host, cron: j.cron!, maxWindowMinutes: j.maxWindowMinutes }));
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+      return;
+    }
+
     try {
       const hosts = loadAllHosts(cfg.hostsDir);
       const secrets = createSecretsResolver({ configDir: cfg.configDir });
@@ -31,15 +47,9 @@ export function scheduleRouter(cfg: ApiConfig, engine: SyncWindowEngine): Router
         if (!folderHasRcloneMember(folder, hosts)) continue;
         jobs.push(...buildFolderPlanFor(cfg, folder, hosts, secrets).schedule);
       }
-      // Syncthing sync windows are scheduled work too — the cron-driven kind
-      // the engine opens itself, as opposed to the crontab-rendered rclone legs.
-      const windows = engine
-        .syncJobs()
-        .filter((j) => j.mode === "scheduled" && j.cron)
-        .map((j) => ({ folder: j.folder, host: j.host, cron: j.cron!, maxWindowMinutes: j.maxWindowMinutes }));
       res.json({ jobs, windows });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.json({ jobs: [], windows, jobsError: (err as Error).message });
     }
   });
 

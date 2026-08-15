@@ -207,9 +207,11 @@ export function Activity() {
             </p>
           )}
 
-          {schedule.isError && (
+          {(schedule.isError || schedule.data?.jobsError) && (
             <p className="mt-4 border-l-2 border-fail py-2 pl-3 text-xs text-dim">
-              Scheduled runs unavailable — the API could not read the schedule.
+              Scheduled bisync runs unavailable — the API could not plan them
+              {schedule.data?.jobsError ? ` (${schedule.data.jobsError})` : ""}. Sync windows are
+              unaffected.
             </p>
           )}
         </section>
