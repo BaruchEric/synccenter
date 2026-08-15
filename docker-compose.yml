@@ -26,6 +26,12 @@ services:
       - /share/synccenter-config:/srv/synccenter-config:rw
       - /share/Container/synccenter/state:/var/lib/synccenter:rw
     environment:
+      # MUST match the QTS host timezone (Control Panel → Time). The sync-window
+      # engine evaluates its cron schedules in THIS container's local time while
+      # the rclone bisync crontab runs on QTS cron — a mismatch here silently
+      # shifts every window against the bisync legs (found 2026-08-15, when a
+      # stale America/Toronto entry ran windows 3h early).
+      TZ: America/Tijuana
       SC_CONFIG_DIR: /srv/synccenter-config
       # Serves the built React dashboard at /app. The bundle must come from
       # `bun run --cwd apps/web build:deploy` (see scripts/deploy-web.sh); a
