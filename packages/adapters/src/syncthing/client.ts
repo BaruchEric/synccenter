@@ -20,6 +20,13 @@ export interface SyncthingClientOpts {
   fetch?: typeof fetch;
   /** Per-request timeout in milliseconds. Default 10_000. */
   timeoutMs?: number;
+  /**
+   * Verify the daemon's TLS certificate chain. Syncthing serves its GUI/REST
+   * API with a self-signed certificate by design (auth is the API key, not
+   * the chain), so this defaults to false; https URLs would otherwise always
+   * fail with "unable to verify the first certificate".
+   */
+  verifyTls?: boolean;
 }
 
 export class SyncthingClient {
@@ -27,12 +34,14 @@ export class SyncthingClient {
   private readonly apiKey: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly verifyTls: boolean;
 
   constructor(opts: SyncthingClientOpts) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.apiKey = opts.apiKey;
     this.fetchImpl = opts.fetch ?? globalThis.fetch;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
+    this.verifyTls = opts.verifyTls ?? false;
   }
 
   /** GET /rest/system/ping → liveness check. */
@@ -170,9 +179,18 @@ export class SyncthingClient {
     }
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    const init: RequestInit & { tls?: { rejectUnauthorized: boolean } } = {
+      method,
+      headers,
+      body: payload,
+      signal: ctrl.signal,
+    };
+    if (!this.verifyTls && url.startsWith("https:")) {
+      init.tls = { rejectUnauthorized: false };
+    }
     let res: Response;
     try {
-      res = await this.fetchImpl(url, { method, headers, body: payload, signal: ctrl.signal });
+      res = await this.fetchImpl(url, init);
     } catch (cause) {
       throw new SyncthingError(
         cause instanceof Error && cause.name === "AbortError"
