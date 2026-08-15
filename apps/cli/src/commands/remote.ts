@@ -93,6 +93,56 @@ export function registerRemoteCommands(program: Command): void {
       }
     });
 
+  program
+    .command("sync <folder>")
+    .description("Open a sync window now: resume the folder's scheduled/manual members, catch up, pause again")
+    .option("--host <host>", "Only this member (default: every scheduled/manual member)")
+    .action(async (folder: string, o: { host?: string }, cmd: Command) => {
+      const ctx = ctxOf(cmd);
+      try {
+        const api = apiFromCmd(cmd);
+        const qs = o.host ? `?host=${encodeURIComponent(o.host)}` : "";
+        const r = await api.post(`/folders/${encodeURIComponent(folder)}/sync${qs}`);
+        emit(ctx, JSON.stringify(r, null, 2), r);
+      } catch (err) {
+        handle(ctx, err);
+      }
+    });
+
+  program
+    .command("windows")
+    .description("List sync windows (open and recent) for scheduled/manual members")
+    .option("--limit <n>", "How many to list", "20")
+    .action(async (o: { limit?: string }, cmd: Command) => {
+      const ctx = ctxOf(cmd);
+      try {
+        const api = apiFromCmd(cmd);
+        const r = await api.get<{
+          windows: Array<{
+            id: number;
+            folder: string;
+            host: string;
+            state: string;
+            phase: string;
+            via: string;
+            started_at: string;
+            finished_at: string | null;
+            fraction: number | null;
+            need_bytes: number;
+          }>;
+          activeCount: number;
+        }>(`/windows?limit=${encodeURIComponent(o.limit ?? "20")}`);
+        const lines = r.windows.map((w) => {
+          const pct = w.fraction == null ? "—" : `${Math.round(w.fraction * 100)}%`;
+          const live = w.state === "running" ? w.phase : w.state;
+          return `#${w.id} ${w.folder} on ${w.host} · ${live} · ${pct} · via ${w.via} · ${w.started_at}`;
+        });
+        emit(ctx, lines.length ? lines.join("\n") : "(no sync windows recorded)", r);
+      } catch (err) {
+        handle(ctx, err);
+      }
+    });
+
   // ---- bisync ----
 
   const bisync = program.command("bisync").description("rclone bisync operations");

@@ -17,6 +17,9 @@ import { openDb, type Db } from "./db.ts";
 import { EventBus } from "./lib/bus.ts";
 import { RunTracker } from "./lib/run-tracker.ts";
 import { abandonStaleRuns } from "./lib/runs-service.ts";
+import { SyncWindowEngine } from "./lib/sync-windows.ts";
+import { abandonStaleWindows } from "./lib/windows-service.ts";
+import { windowsRouter } from "./routes/windows.ts";
 import { metricsHandlerFactory } from "./metrics.ts";
 import { foldersRouter } from "./routes/folders.ts";
 import { rulesRouter } from "./routes/rules.ts";
@@ -54,6 +57,11 @@ export interface BuiltApp {
    * interval out of every test that builds an app.
    */
   tracker: RunTracker;
+  /**
+   * Runs sync windows for scheduled/manual members. Same contract as the
+   * tracker: built stopped, started only by the entrypoint.
+   */
+  engine: SyncWindowEngine;
 }
 
 export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppDeps): BuiltApp {
@@ -75,7 +83,9 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
   // running belongs to a job we can no longer identify. Close them out rather
   // than polling ids that may since have been handed to something else.
   abandonStaleRuns(database);
+  abandonStaleWindows(database);
   const tracker = new RunTracker({ db: database, bus, rclone: rcloneClient });
+  const engine = new SyncWindowEngine({ cfg, db: database, bus, registry: reg });
   tracker.onFinished = (run) => {
     database.run(
       `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
@@ -161,15 +171,16 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
 
   app.use(bearerAuth(cfg.apiToken));
 
-  app.use("/", foldersRouter(cfg, reg, database, rcloneClient, bus));
+  app.use("/", foldersRouter(cfg, reg, database, rcloneClient, bus, engine));
   app.use("/", runsRouter(database, bus, rcloneClient));
+  app.use("/", windowsRouter(database, engine));
   app.use("/", eventsRouter(database, bus));
   app.use("/", rulesRouter(cfg));
   app.use("/", hostsRouter(cfg, reg));
   app.use("/", rcloneRouter(rcloneClient));
   app.use("/", importsRouter({ cfg, ...(importerFetch ? { importerFetch } : {}) }));
   app.use("/", stateRouter(cfg));
-  app.use("/", scheduleRouter(cfg));
+  app.use("/", scheduleRouter(cfg, engine));
   app.use("/", systemRouter(database));
 
   app.use((_req, res) => res.status(404).json({ error: "not found" }));
@@ -179,7 +190,7 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
     res.status(500).json({ error: message });
   });
 
-  return { app, db: database, registry: reg, rclone: rcloneClient, bus, tracker };
+  return { app, db: database, registry: reg, rclone: rcloneClient, bus, tracker, engine };
 }
 
 /** Human-readable byte count for the history note. */

@@ -1,7 +1,7 @@
 import { mapPolicy } from "./conflict.ts";
 import { buildSchedulePlan } from "./schedule.ts";
 import { PlanError } from "./errors.ts";
-import { isRcloneHost, type FolderManifest, type HostManifest, type RcloneHostManifest, type SyncthingHostManifest } from "./load.ts";
+import { effectiveSync, isRcloneHost, type FolderManifest, type HostManifest, type RcloneHostManifest, type SyncthingHostManifest } from "./load.ts";
 import type {
   ApplyPlan,
   HostName,
@@ -117,6 +117,7 @@ export function plan(args: PlanArgs): ApplyPlan {
 
   // 4. Build per-host op lists (syncthing members only — rclone members have no daemon to configure).
   const perHost: Record<HostName, SyncthingOp[]> = {};
+  const warnings: string[] = [];
   const policy = mapPolicy(folder.conflict?.policy);
   for (const host of syncthingMembers) {
     const hostName = host.name;
@@ -124,8 +125,25 @@ export function plan(args: PlanArgs): ApplyPlan {
     const ov = folder.overrides?.[hostName] ?? {};
     const type = ov.type ?? folder.type;
     const ignorePerms = ov.ignore_perms ?? folder.ignore_perms;
-    const fsWatcherEnabled = ov.fs_watcher_enabled ?? folder.fs_watcher_enabled;
+    let fsWatcherEnabled = ov.fs_watcher_enabled ?? folder.fs_watcher_enabled;
     const fsWatcherDelay = ov.fs_watcher_delay_s ?? folder.fs_watcher_delay_s;
+
+    // A scheduled/manual member exists to NOT work between windows: the watcher
+    // goes off and the periodic rescan gets pushed out to daily, so the only
+    // scanning it ever does is the one each sync window asks for. This wins
+    // over an explicit fs_watcher_enabled: true — silently keeping the watcher
+    // would make "scheduled" a label rather than a behavior.
+    const sync = effectiveSync(folder, hostName);
+    let rescanIntervalS: number | undefined;
+    if (sync.mode !== "realtime") {
+      if (fsWatcherEnabled === true) {
+        warnings.push(
+          `${hostName}: fs_watcher_enabled: true ignored — sync mode '${sync.mode}' turns the watcher off`,
+        );
+      }
+      fsWatcherEnabled = false;
+      rescanIntervalS = 86400;
+    }
 
     const ops: SyncthingOp[] = [];
     // Add every OTHER syncthing member as a known device.
@@ -148,6 +166,7 @@ export function plan(args: PlanArgs): ApplyPlan {
       ...(ignorePerms !== undefined && { ignorePerms }),
       ...(fsWatcherEnabled !== undefined && { fsWatcherEnabled }),
       ...(fsWatcherDelay !== undefined && { fsWatcherDelayS: fsWatcherDelay }),
+      ...(rescanIntervalS !== undefined && { rescanIntervalS }),
     };
     ops.push({ kind: "addFolder", host: hostName as HostName, folder: folderConfig });
     // Set ignores.
@@ -172,6 +191,6 @@ export function plan(args: PlanArgs): ApplyPlan {
     folder: folder.name,
     perHost,
     schedule,
-    warnings: [],
+    warnings,
   };
 }

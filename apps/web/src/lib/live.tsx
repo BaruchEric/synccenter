@@ -1,13 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectLive, type LiveStatus, type ScEvent } from "@/lib/events";
-import type { RunView } from "@/lib/api";
+import type { RunView, WindowView } from "@/lib/api";
 
 interface LiveValue {
   status: LiveStatus;
   /** Newest first. Everything the server has told us about, capped. */
   runs: RunView[];
   active: RunView[];
+  /** Sync windows, same discipline as runs: pushed live, capped, newest first. */
+  windows: WindowView[];
+  activeWindows: WindowView[];
   /** Rises on every folder event, so views can key off "something changed". */
   revision: number;
 }
@@ -16,6 +19,8 @@ const LiveCtx = createContext<LiveValue>({
   status: "connecting",
   runs: [],
   active: [],
+  windows: [],
+  activeWindows: [],
   revision: 0,
 });
 
@@ -33,6 +38,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   const qc = useQueryClient();
   const [status, setStatus] = useState<LiveStatus>("connecting");
   const [runs, setRuns] = useState<RunView[]>([]);
+  const [windows, setWindows] = useState<WindowView[]>([]);
   const [revision, setRevision] = useState(0);
   // The connection outlives renders; keep the callbacks off the effect's deps.
   const qcRef = useRef(qc);
@@ -42,6 +48,9 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     const onEvent = (e: ScEvent) => {
       if (e.type === "hello") {
         setRuns(e.runs.slice(0, KEEP));
+        // The polling fallback replays hello frames without windows; keeping
+        // the last known list beats blanking an open window's band.
+        if (e.windows) setWindows(e.windows.slice(0, KEEP));
         return;
       }
       if (e.type === "run") {
@@ -54,6 +63,18 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         if (e.run.state !== "running") {
           void qcRef.current.invalidateQueries({ queryKey: ["apply-history"] });
           void qcRef.current.invalidateQueries({ queryKey: ["folder-state", e.run.folder] });
+        }
+        return;
+      }
+      if (e.type === "window") {
+        setWindows((prev) => {
+          const next = prev.filter((w) => w.id !== e.window.id);
+          next.unshift(e.window);
+          return next.slice(0, KEEP);
+        });
+        if (e.window.state !== "running") {
+          void qcRef.current.invalidateQueries({ queryKey: ["apply-history"] });
+          void qcRef.current.invalidateQueries({ queryKey: ["folder-state", e.window.folder] });
         }
         return;
       }
@@ -72,8 +93,15 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<LiveValue>(
-    () => ({ status, runs, active: runs.filter((r) => r.state === "running"), revision }),
-    [status, runs, revision],
+    () => ({
+      status,
+      runs,
+      active: runs.filter((r) => r.state === "running"),
+      windows,
+      activeWindows: windows.filter((w) => w.state === "running"),
+      revision,
+    }),
+    [status, runs, windows, revision],
   );
 
   return <LiveCtx.Provider value={value}>{children}</LiveCtx.Provider>;

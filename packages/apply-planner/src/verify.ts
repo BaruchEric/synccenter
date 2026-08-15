@@ -42,7 +42,7 @@ export async function verify(p: ApplyPlan, pool: AdapterPool): Promise<VerifyRes
   return { verified, report };
 }
 
-function normalizeFolder(raw: { id: string; label?: string; path: string; type: SyncthingFolderConfig["type"]; devices: { deviceID: string }[]; paused?: boolean; fsWatcherEnabled?: boolean; fsWatcherDelayS?: number; ignorePerms?: boolean }): SyncthingFolderConfig {
+function normalizeFolder(raw: { id: string; label?: string; path: string; type: SyncthingFolderConfig["type"]; devices: { deviceID: string }[]; paused?: boolean; fsWatcherEnabled?: boolean; fsWatcherDelayS?: number; rescanIntervalS?: number; ignorePerms?: boolean }): SyncthingFolderConfig {
   return {
     id: raw.id,
     label: raw.label ?? raw.id,
@@ -52,6 +52,7 @@ function normalizeFolder(raw: { id: string; label?: string; path: string; type: 
     paused: raw.paused,
     fsWatcherEnabled: raw.fsWatcherEnabled,
     fsWatcherDelayS: raw.fsWatcherDelayS,
+    rescanIntervalS: raw.rescanIntervalS,
     ignorePerms: raw.ignorePerms,
   };
 }

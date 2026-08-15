@@ -3,6 +3,9 @@ export { SyncthingError } from "./errors.ts";
 export type {
   NewSyncthingDevice,
   NewSyncthingFolder,
+  SyncthingCompletion,
+  SyncthingConnection,
+  SyncthingConnections,
   SyncthingDeviceConfig,
   SyncthingEvent,
   SyncthingFolderConfig,

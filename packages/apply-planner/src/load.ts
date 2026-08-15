@@ -30,6 +30,43 @@ export interface BisyncSettings {
   flags?: string[];
 }
 
+export type SyncMode = "realtime" | "scheduled" | "manual";
+
+export interface SyncSettings {
+  mode?: SyncMode;
+  /** 5-field cron opening sync windows. Only meaningful for mode: scheduled. */
+  schedule?: string;
+  max_window_minutes?: number;
+}
+
+/** A member's resolved sync policy, with every default filled in. */
+export interface EffectiveSync {
+  mode: SyncMode;
+  schedule?: string;
+  maxWindowMinutes: number;
+}
+
+export const DEFAULT_MAX_WINDOW_MINUTES = 60;
+
+/**
+ * Resolve how one Syncthing member participates in a folder: the member
+ * override wins over the folder-level `sync` block, which defaults to realtime.
+ * Structural on purpose — the API keeps its own looser FolderManifest type,
+ * and this only reads the `sync` blocks.
+ */
+export function effectiveSync(
+  folder: { sync?: SyncSettings; overrides?: Record<string, { sync?: SyncSettings } | undefined> },
+  host: string,
+): EffectiveSync {
+  const merged = { ...folder.sync, ...folder.overrides?.[host]?.sync };
+  const mode = merged.mode ?? "realtime";
+  return {
+    mode,
+    ...(mode === "scheduled" && merged.schedule ? { schedule: merged.schedule } : {}),
+    maxWindowMinutes: merged.max_window_minutes ?? DEFAULT_MAX_WINDOW_MINUTES,
+  };
+}
+
 export interface FolderManifest {
   name: string;
   ruleset: string;
@@ -56,6 +93,7 @@ export interface FolderManifest {
   ignore_perms?: boolean;
   fs_watcher_enabled?: boolean;
   fs_watcher_delay_s?: number;
+  sync?: SyncSettings;
 }
 
 /** A live P2P device in the Syncthing mesh. */

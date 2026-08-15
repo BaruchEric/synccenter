@@ -12,6 +12,7 @@ import { nextRuns, relative } from "@/lib/cron";
 import { FolderActions } from "@/components/FolderActions";
 import { RunBand } from "@/components/RunBand";
 import { SyncBand, type HostStatus } from "@/components/SyncBand";
+import { WindowBand } from "@/components/WindowBand";
 import { useLive } from "@/lib/live";
 import { LiveLamp } from "@/components/LiveLamp";
 
@@ -28,7 +29,7 @@ import { LiveLamp } from "@/components/LiveLamp";
 export function Activity() {
   const [now, setNow] = useState(() => new Date());
   const [selected, setSelected] = useState<Event | null>(null);
-  const { status, active } = useLive();
+  const { status, active, activeWindows } = useLive();
 
   // One clock for the whole view, so every relative time recomputes together.
   useEffect(() => {
@@ -63,17 +64,22 @@ export function Activity() {
   });
 
   // Idle is the resting state and paused is deliberate; neither is work in
-  // flight. Everything else — scanning, syncing, cleaning, error — is.
+  // flight. Everything else — scanning, syncing, cleaning, error — is. A pair
+  // with an open sync window is excluded: its WindowBand is already drawing
+  // this activity, with more context than the raw folder state has.
+  const windowed = new Set(activeWindows.map((w) => `${w.folder}@${w.host}`));
   const busy = names.flatMap((name, i) =>
     (states[i]?.data?.perHost ?? [])
       .filter((h) => h.ok && h.status && h.status.state !== "idle" && h.status.state !== "paused")
+      .filter((h) => !windowed.has(`${name}@${h.host}`))
       .map((h) => ({ folder: name, host: h.host, status: h.status as HostStatus })),
   );
 
   const upcoming = useMemo<Event[]>(() => {
     const jobs = schedule.data?.jobs ?? [];
-    return jobs
-      .flatMap((j) =>
+    const winJobs = schedule.data?.windows ?? [];
+    return [
+      ...jobs.flatMap((j) =>
         nextRuns(j.cron, 2, now).map((at) => ({
           kind: "scheduled" as const,
           at,
@@ -81,8 +87,17 @@ export function Activity() {
           detail: `bisync → ${j.member}`,
           job: j,
         })),
-      )
-      .sort((a, b) => b.at.getTime() - a.at.getTime()); // furthest future at top
+      ),
+      ...winJobs.flatMap((w) =>
+        nextRuns(w.cron, 2, now).map((at) => ({
+          kind: "scheduled" as const,
+          at,
+          title: w.folder,
+          detail: `sync window on ${w.host}`,
+          win: w,
+        })),
+      ),
+    ].sort((a, b) => b.at.getTime() - a.at.getTime()); // furthest future at top
     // `now` intentionally omitted: re-deriving every second would remount rows.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule.data]);
@@ -152,6 +167,10 @@ export function Activity() {
                 <RunBand key={run.id} run={run} now={now} />
               ))}
 
+              {activeWindows.map((w) => (
+                <WindowBand key={`w-${w.id}`} window={w} now={now} />
+              ))}
+
               {busy.map((b) => (
                 <SyncBand
                   key={`${b.folder}@${b.host}`}
@@ -181,9 +200,10 @@ export function Activity() {
               now line read as "the 04:00 run never happened". */}
           {!loading && (schedule.data?.jobs.length ?? 0) > 0 && (
             <p className="mt-6 border-l-2 border-rule py-2 pl-3 text-xs text-dim">
-              The now line carries bisync runs started from this dashboard (amber) and whatever
-              Syncthing is doing on its own (blue). Scheduled runs are neither: they execute on the
-              anchor host directly and finish without reporting progress here.
+              The now line carries bisync runs started from this dashboard (amber), sync windows on
+              held members (blue, with a close control), and whatever Syncthing is doing on its own
+              (blue). Scheduled bisync runs are none of these: they execute on the anchor host
+              directly and finish without reporting progress here.
             </p>
           )}
 
@@ -201,6 +221,7 @@ export function Activity() {
 }
 
 type ScheduleJob = ScheduleList["jobs"][number];
+type ScheduleWindowJob = NonNullable<ScheduleList["windows"]>[number];
 type HistoryRow = ApplyHistory["history"][number];
 interface Event {
   kind: "scheduled" | "history";
@@ -208,6 +229,7 @@ interface Event {
   title: string;
   detail: string;
   job?: ScheduleJob;
+  win?: ScheduleWindowJob;
   row?: HistoryRow;
 }
 
@@ -341,14 +363,17 @@ function Leg({ name, q, hasCloud }: { name: string; q?: StateQuery; hasCloud: bo
         // `host` is always a string. The old defensive object-unwrap here
         // implied a hazard the SyncBand rows above do not guard against.
         const host = h.host;
-        const state = h.ok ? h.status?.state : "unreachable";
+        // A scheduled/manual member is SUPPOSED to sit paused between windows —
+        // that is its resting state, and it reads as such, not as trouble.
+        const held = h.mode && h.mode !== "realtime" && h.ok && h.status?.state === "paused";
+        const state = held ? `held · ${h.mode}` : h.ok ? h.status?.state : "unreachable";
         const need = h.status?.needFiles ?? 0;
         return (
           <span key={host} className="flex items-baseline gap-1.5 text-xs">
             <span className="font-mono text-slate-400">{host}</span>
             <span
               className={
-                !h.ok ? "text-fail" : state === "idle" ? "text-ok" : "text-run"
+                !h.ok ? "text-fail" : held ? "text-dim" : state === "idle" ? "text-ok" : "text-run"
               }
             >
               {state}
@@ -404,6 +429,19 @@ function Detail({ event, now }: { event: Event | null; now: Date }) {
             <Field label="Anchor" value={j.anchor} />
             <Field label="Cloud member" value={j.member} />
             <Field label="Command" value={j.command} wrap />
+          </>
+        )}
+        {event.win && (
+          <>
+            <Field label="Status" value="scheduled sync window" tone="text-dim" />
+            <Field label="Schedule" value={event.win.cron} />
+            <Field label="Host" value={event.win.host} />
+            <Field label="Window cap" value={`${event.win.maxWindowMinutes} min`} />
+            <Field
+              label="What happens"
+              value="The folder is resumed on this host, Syncthing catches up both ways, then it is paused again."
+              wrap
+            />
           </>
         )}
       </dl>

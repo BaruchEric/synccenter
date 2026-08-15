@@ -58,6 +58,35 @@ const SCHEMA = [
    )`,
   `CREATE INDEX IF NOT EXISTS runs_active ON runs (state) WHERE state = 'running'`,
   `CREATE INDEX IF NOT EXISTS runs_recent ON runs (started_at DESC)`,
+
+  // Sync windows: the stretches where a scheduled/manual Syncthing member
+  // (paused the rest of the time) is resumed, catches up, and is paused again.
+  // One row per window per host, updated live while it runs so the UI can show
+  // progress the same way it shows bisync runs.
+  `CREATE TABLE IF NOT EXISTS sync_windows (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     folder TEXT NOT NULL,
+     host TEXT NOT NULL,
+     via TEXT NOT NULL CHECK (via IN ('schedule','manual')),
+     started_at TEXT NOT NULL,
+     finished_at TEXT,
+     state TEXT NOT NULL CHECK (state IN ('running','done','failed','timeout','stopped')),
+     max_minutes INTEGER NOT NULL DEFAULT 60,
+     sync_state TEXT,
+     global_bytes INTEGER NOT NULL DEFAULT 0,
+     in_sync_bytes INTEGER NOT NULL DEFAULT 0,
+     need_bytes INTEGER NOT NULL DEFAULT 0,
+     need_files INTEGER NOT NULL DEFAULT 0,
+     errors INTEGER NOT NULL DEFAULT 0,
+     peers_total INTEGER NOT NULL DEFAULT 0,
+     peers_done INTEGER NOT NULL DEFAULT 0,
+     error TEXT,
+     actor TEXT NOT NULL,
+     source TEXT NOT NULL CHECK (source IN ('api','cli','ui','mcp','schedule')),
+     misses INTEGER NOT NULL DEFAULT 0
+   )`,
+  `CREATE INDEX IF NOT EXISTS sync_windows_active ON sync_windows (state) WHERE state = 'running'`,
+  `CREATE INDEX IF NOT EXISTS sync_windows_recent ON sync_windows (started_at DESC)`,
 ];
 
 export function openDb(path: string): Db {

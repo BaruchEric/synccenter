@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { RcloneClient, RcloneError, SyncthingError } from "@synccenter/adapters";
 import { CompileError } from "@synccenter/rule-compiler";
-import { loadAllHosts, PlanError, resolveBisyncAnchor } from "@synccenter/apply-planner";
+import { effectiveSync, loadAllHosts, PlanError, resolveBisyncAnchor } from "@synccenter/apply-planner";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 import { listYamlNames, parseFolderByName } from "../lib/fs.ts";
@@ -21,6 +21,9 @@ import { respondJsonError } from "../lib/errors.ts";
 import { HostRegistry, HostRegistryError } from "../registry.ts";
 import type { EventBus, FolderAction } from "../lib/bus.ts";
 import { startRun, toView } from "../lib/runs-service.ts";
+import { SyncWindowError, type SyncWindowEngine } from "../lib/sync-windows.ts";
+import { toWindowView } from "../lib/windows-service.ts";
+import { syncWindowErrorStatus } from "./windows.ts";
 
 export function foldersRouter(
   cfg: ApiConfig,
@@ -28,6 +31,7 @@ export function foldersRouter(
   db: Db,
   rclone: RcloneClient | null,
   bus: EventBus,
+  engine: SyncWindowEngine,
 ): Router {
   const r = Router();
 
@@ -79,15 +83,55 @@ export function foldersRouter(
     const hosts = syncthingHosts(m);
     const perHost = await Promise.all(
       hosts.map(async (host) => {
+        // The mode explains the state: a scheduled member reading `paused` is
+        // resting between windows, not stuck — the UI needs to know which.
+        const mode = effectiveSync(m, host).mode;
         try {
           const status = await registry.client(host).getFolderStatus(m.name);
-          return { host, ok: true as const, status };
+          return { host, mode, ok: true as const, status };
         } catch (err) {
-          return { host, ok: false as const, error: errorMessage(err) };
+          return { host, mode, ok: false as const, error: errorMessage(err) };
         }
       }),
     );
     res.json({ folder: m.name, perHost });
+  });
+
+  /**
+   * Open an on-demand sync window: resume the folder on its held (scheduled/
+   * manual) members, let Syncthing catch up, pause again. `?host=` narrows it
+   * to one member; default is every held member of the folder.
+   */
+  r.post("/folders/:name/sync", async (req, res) => {
+    const m = parseFolderByName(cfg.foldersDir, req.params.name);
+    if (!m) {
+      res.status(404).json({ error: `folder not found: ${req.params.name}` });
+      return;
+    }
+    const held = Object.keys(m.paths).filter(
+      (h) => !registry.isRclone(h) && effectiveSync(m, h).mode !== "realtime",
+    );
+    const requested = typeof req.query.host === "string" ? [req.query.host] : held;
+    if (requested.length === 0) {
+      res.status(400).json({
+        error: `folder ${m.name} has no scheduled/manual members — every Syncthing member is realtime`,
+      });
+      return;
+    }
+    const windows = [];
+    const failed = [];
+    for (const host of requested) {
+      try {
+        windows.push(toWindowView(await engine.open(m.name, host, "manual", "api-bearer", "api")));
+      } catch (err) {
+        if (err instanceof SyncWindowError && requested.length === 1) {
+          res.status(syncWindowErrorStatus(err)).json({ error: err.message, code: err.code });
+          return;
+        }
+        failed.push({ host, error: errorMessage(err) });
+      }
+    }
+    res.status(windows.length > 0 ? 200 : 500).json({ folder: m.name, windows, failed });
   });
 
   const broadcast = async (
@@ -212,6 +256,9 @@ export function foldersRouter(
         return;
       }
       announce(req.params.name, "applied");
+      // Apply creates folders unpaused; held members must not stay live until
+      // the next reconcile interval happens to notice.
+      void engine.reconcile();
       res.json({ result: outcome.result, delta: outcome.delta });
     } catch (err) {
       if (err instanceof CompileError) {

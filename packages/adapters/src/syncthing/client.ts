@@ -2,6 +2,8 @@ import { SyncthingError } from "./errors.ts";
 import type {
   NewSyncthingDevice,
   NewSyncthingFolder,
+  SyncthingCompletion,
+  SyncthingConnections,
   SyncthingDeviceConfig,
   SyncthingEvent,
   SyncthingFolderConfig,
@@ -77,6 +79,21 @@ export class SyncthingClient {
   /** GET /rest/db/status?folder=ID */
   getFolderStatus(id: string): Promise<SyncthingFolderStatus> {
     return this.json("GET", `/rest/db/status?folder=${encodeURIComponent(id)}`);
+  }
+
+  /** GET /rest/system/connections — which devices are reachable right now. */
+  getConnections(): Promise<SyncthingConnections> {
+    return this.json("GET", "/rest/system/connections");
+  }
+
+  /**
+   * GET /rest/db/completion?folder=ID&device=ID — how complete `device`'s copy
+   * of `folder` is, from this daemon's point of view (100 = it has everything
+   * we have).
+   */
+  getCompletion(folder: string, device: string): Promise<SyncthingCompletion> {
+    const q = new URLSearchParams({ folder, device });
+    return this.json("GET", `/rest/db/completion?${q.toString()}`);
   }
 
   /**

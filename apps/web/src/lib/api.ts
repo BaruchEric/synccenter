@@ -79,6 +79,13 @@ export interface ScheduleList {
     command: string;
     filtersFile: string;
   }>;
+  /** Cron-opened Syncthing sync windows for scheduled members. */
+  windows?: Array<{
+    folder: string;
+    host: string;
+    cron: string;
+    maxWindowMinutes: number;
+  }>;
 }
 /** What a bisync is doing right now, as served by /runs and pushed over /events. */
 export type RunPhase = "starting" | "checking" | "transferring" | "finished";
@@ -112,6 +119,38 @@ export interface RunsList {
   runs: RunView[];
   activeCount: number;
 }
+/** How a Syncthing member participates in a folder. */
+export type SyncMode = "realtime" | "scheduled" | "manual";
+/** One sync window — a held member resumed, catching up, and re-paused. */
+export type WindowPhase = "starting" | "scanning" | "syncing" | "settling" | "finished";
+export interface WindowView {
+  id: number;
+  folder: string;
+  host: string;
+  via: "schedule" | "manual";
+  started_at: string;
+  finished_at: string | null;
+  state: "running" | "done" | "failed" | "timeout" | "stopped";
+  max_minutes: number;
+  sync_state: string | null;
+  global_bytes: number;
+  in_sync_bytes: number;
+  need_bytes: number;
+  need_files: number;
+  errors: number;
+  peers_total: number;
+  peers_done: number;
+  error: string | null;
+  actor: string;
+  source: string;
+  phase: WindowPhase;
+  /** 0–1 of the tree in sync locally, or null while scanning. */
+  fraction: number | null;
+}
+export interface WindowsList {
+  windows: WindowView[];
+  activeCount: number;
+}
 /** A folder manifest as stored in synccenter-config/folders/<name>.yaml. */
 export interface FolderManifest {
   name: string;
@@ -121,7 +160,20 @@ export interface FolderManifest {
   type: string;
   paths: Record<string, string>;
   bisync?: { schedule?: string; anchor?: string; flags?: string[] };
+  sync?: { mode?: SyncMode; schedule?: string; max_window_minutes?: number };
+  overrides?: Record<string, { sync?: { mode?: SyncMode; schedule?: string } } | undefined>;
   [key: string]: unknown;
+}
+
+/**
+ * Members that sync in windows rather than continuously — the ones "Sync now"
+ * applies to. Mirrors the server's effectiveSync (override wins over folder).
+ */
+export function heldMembers(m: FolderManifest): string[] {
+  return Object.keys(m.paths).filter((host) => {
+    const mode = m.overrides?.[host]?.sync?.mode ?? m.sync?.mode ?? "realtime";
+    return mode !== "realtime";
+  });
 }
 /** A host manifest as stored in synccenter-config/hosts/<name>.yaml. */
 export interface HostManifest {
@@ -143,6 +195,8 @@ export interface FolderState {
   folder: string;
   perHost: Array<{
     host: string;
+    /** How this member syncs: paused-between-windows members report scheduled/manual. */
+    mode?: SyncMode;
     ok: boolean;
     error?: string;
     /** Passed through verbatim from Syncthing's `db/status`; this is the subset we read. */

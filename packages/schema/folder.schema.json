@@ -75,6 +75,10 @@
     },
     "fs_watcher_enabled": { "type": "boolean" },
     "fs_watcher_delay_s": { "type": "integer", "minimum": 1, "maximum": 3600 },
+    "sync": {
+      "$ref": "#/$defs/syncSettings",
+      "description": "How Syncthing members participate: realtime (default) keeps the folder live; scheduled/manual keep it PAUSED on that member except during sync windows opened by cron or on demand. Usually set per member via overrides.<member>.sync — e.g. the QNAP scheduled, everything else realtime."
+    },
     "conflict": {
       "type": "object",
       "additionalProperties": false,
@@ -98,6 +102,7 @@
           "ignore_perms": { "type": "boolean" },
           "fs_watcher_enabled": { "type": "boolean" },
           "fs_watcher_delay_s": { "type": "integer", "minimum": 1, "maximum": 3600 },
+          "sync": { "$ref": "#/$defs/syncSettings" },
           "versioning": { "$ref": "#/properties/versioning" },
           "bisync": {
             "type": "object",
@@ -110,6 +115,31 @@
         }
       },
       "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" }
+    }
+  },
+  "$defs": {
+    "syncSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["realtime", "scheduled", "manual"],
+          "default": "realtime",
+          "description": "realtime: continuous Syncthing sync. scheduled: paused except during cron-opened sync windows. manual: paused except during on-demand windows (Sync now)."
+        },
+        "schedule": {
+          "type": "string",
+          "description": "5-field cron for opening sync windows. Required when mode is scheduled; ignored otherwise."
+        },
+        "max_window_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440,
+          "default": 60,
+          "description": "Hard cap on a sync window. A window still catching up at the cap is re-paused and recorded as timeout."
+        }
+      }
     }
   }
 }

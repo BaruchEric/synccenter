@@ -5,6 +5,13 @@ Versions group commits by phase; see `git log` for individual commits.
 
 ## [Unreleased]
 
+### Added — sync windows: scheduled/manual members instead of realtime
+- Per-member sync modes (`sync.mode: realtime | scheduled | manual`, folder-level or `overrides.<member>.sync`) for Syncthing members that should not sync continuously — built for the QNAP, whose CPU was pinned by watcher + delete-retry churn. A held member keeps its folder **paused** except during **sync windows**: resumed on a cron (`sync.schedule`) or on demand, polled until caught up locally and at every connected peer, then paused again (`max_window_minutes` cap, default 60). Runs inside the API (`SyncWindowEngine`) — cron sweep, 2 s window polling with live SSE `window` events, and a reconciler (boot / 5 min / after apply) that re-pauses any held member left running.
+- Planner: a held member's applied config forces `fsWatcherEnabled: false` and `rescanIntervalS: 86400` (warning when the manifest asked for the watcher); `rescanIntervalS` joined the delta/verify field set. New adapter calls: `getConnections()`, `getCompletion(folder, device)`.
+- API: `POST /folders/:name/sync[?host=]`, `GET /windows`, `GET /windows/:id`, `POST /windows/:id/stop`; `/schedule` gained a `windows` list; `/folders/:name/state` reports each member's `mode`; `/events` hello carries recent windows. New `sync_windows` table, abandoned-on-boot like runs.
+- UI: **Sync now** action on folders with held members, a live `WindowBand` on the activity timeline (phase, % in sync, peers caught up, close control), scheduled windows on the upcoming timeline, and held members reading `held · scheduled` instead of `paused`. CLI: `sc sync <folder> [--host]`, `sc windows`.
+- Runbook: `docs/runbooks/scheduled-sync.md` (includes deploy order: API code before manifests that use `sync:`).
+
 ### Changed — BREAKING: cloud remotes are now mesh members
 - Folder manifests no longer have a `cloud:` block. A cloud remote (Google Drive, Dropbox, S3, another NAS — anything rclone speaks) is now a **host** with `engine: rclone` and a `remote:` name (`hosts/gdrive.yaml`), and joins a folder like any other member: a key under `paths:` whose value is the path inside the remote. Bisync scheduling moved to a folder-level `bisync:` block (`anchor`, `schedule`, `flags`), with per-member overrides under `overrides.<member>.bisync`. Migration: `cloud.rclone_remote`+`remote_path` → a `hosts/<name>.yaml` with `engine: rclone` + a `paths.<name>` entry; `cloud.anchor`/`cloud.bisync.*` → the `bisync:` block.
 - `host.schema.json` gained `engine: syncthing | rclone` (default syncthing). rclone hosts require only `name` + `remote`; syncthing hosts keep the previous required set.

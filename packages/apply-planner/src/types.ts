@@ -18,6 +18,7 @@ export interface SyncthingFolderConfig {
   ignorePerms?: boolean;
   fsWatcherEnabled?: boolean;
   fsWatcherDelayS?: number;
+  rescanIntervalS?: number;
   paused?: boolean;
 }
 

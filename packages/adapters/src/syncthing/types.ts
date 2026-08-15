@@ -47,6 +47,7 @@ export interface SyncthingFolderConfig {
   paused: boolean;
   fsWatcherEnabled?: boolean;
   fsWatcherDelayS?: number;
+  rescanIntervalS?: number;
   ignorePerms?: boolean;
 }
 
@@ -93,6 +94,33 @@ export interface SyncthingIgnores {
   error?: string | null;
 }
 
+/**
+ * One row of /rest/system/connections. Only the fields the sync-window engine
+ * reads: whether the device is reachable right now.
+ */
+export interface SyncthingConnection {
+  connected: boolean;
+  paused: boolean;
+  address?: string;
+}
+
+export interface SyncthingConnections {
+  connections: Record<string, SyncthingConnection>;
+}
+
+/**
+ * /rest/db/completion for one device+folder pair — how much of OUR data that
+ * device has, as a 0–100 percentage.
+ */
+export interface SyncthingCompletion {
+  completion: number;
+  globalBytes: number;
+  needBytes: number;
+  needItems: number;
+  needDeletes: number;
+  remoteState?: string;
+}
+
 export interface SyncthingEvent {
   id: number;
   globalID: number;
@@ -110,6 +138,7 @@ export interface NewSyncthingFolder {
   label?: string;
   fsWatcherEnabled?: boolean;
   fsWatcherDelayS?: number;
+  rescanIntervalS?: number;
   ignorePerms?: boolean;
 }
 

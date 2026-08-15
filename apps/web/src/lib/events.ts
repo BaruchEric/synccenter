@@ -1,11 +1,12 @@
 import { getToken } from "@/lib/auth";
-import type { RunView } from "@/lib/api";
+import type { RunView, WindowView } from "@/lib/api";
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 
 export type ScEvent =
-  | { type: "hello"; runs: RunView[]; at: string }
+  | { type: "hello"; runs: RunView[]; windows?: WindowView[]; at: string }
   | { type: "run"; run: RunView }
+  | { type: "window"; window: WindowView }
   | { type: "folder"; folder: string; action: string };
 
 /**

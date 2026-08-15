@@ -78,7 +78,7 @@ function compareFolderFields(
   actual: SyncthingFolderConfig,
   out: { host: HostName; path: string; expected: unknown; actual: unknown }[],
 ): void {
-  const fields: (keyof SyncthingFolderConfig)[] = ["path", "type", "ignorePerms", "fsWatcherEnabled", "fsWatcherDelayS"];
+  const fields: (keyof SyncthingFolderConfig)[] = ["path", "type", "ignorePerms", "fsWatcherEnabled", "fsWatcherDelayS", "rescanIntervalS"];
   for (const f of fields) {
     const e = expected[f];
     const a = actual[f];

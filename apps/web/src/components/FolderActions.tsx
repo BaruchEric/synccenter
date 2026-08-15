@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type FolderManifest } from "@/lib/api";
+import { api, heldMembers, type FolderManifest } from "@/lib/api";
 
 /**
  * The verbs for one folder. Two tiers, because they are not equally safe:
@@ -37,6 +37,8 @@ export function FolderActions({
       switch (verb) {
         case "bisync":
           return api.post(`/folders/${encodeURIComponent(name)}/bisync?async=true`);
+        case "sync":
+          return api.post(`/folders/${encodeURIComponent(name)}/sync`);
         case "apply":
           return api.post(`/folders/${encodeURIComponent(name)}/apply`, { confirm: true });
         case "pause":
@@ -68,6 +70,11 @@ export function FolderActions({
       {hasCloudMember && (
         <Action onClick={fire("bisync")} disabled={busy || disabled} primary>
           Run
+        </Action>
+      )}
+      {manifest && heldMembers(manifest).length > 0 && (
+        <Action onClick={fire("sync")} disabled={busy || disabled} primary>
+          Sync now
         </Action>
       )}
       <Action onClick={fire("apply")} disabled={busy || disabled}>
@@ -112,10 +119,11 @@ export function FolderActions({
   );
 }
 
-type Verb = "bisync" | "apply" | "pause" | "resume" | "enable" | "disable" | "delete";
+type Verb = "bisync" | "sync" | "apply" | "pause" | "resume" | "enable" | "disable" | "delete";
 
 const DONE: Record<Verb, string> = {
   bisync: "Bisync started on the anchor.",
+  sync: "Sync window opened — watch it on the timeline.",
   apply: "Applied to every host.",
   pause: "Paused.",
   resume: "Resumed.",

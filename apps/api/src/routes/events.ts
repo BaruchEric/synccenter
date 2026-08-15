@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Db } from "../db.ts";
 import type { EventBus, ScEvent } from "../lib/bus.ts";
 import { listRuns, toView } from "../lib/runs-service.ts";
+import { listWindows, toWindowView } from "../lib/windows-service.ts";
 
 /**
  * Heartbeat period. Two jobs: keep proxies from closing an idle stream, and
@@ -44,6 +45,7 @@ export function eventsRouter(db: Db, bus: EventBus): Router {
       `event: hello\ndata: ${JSON.stringify({
         type: "hello",
         runs: listRuns(db, 25).map(toView),
+        windows: listWindows(db, 25).map(toWindowView),
         at: new Date().toISOString(),
       })}\n\n`,
     );

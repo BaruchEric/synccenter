@@ -14,8 +14,10 @@ export {
   isRcloneHost,
   isSyncthingHost,
   folderHasRcloneMember,
+  effectiveSync,
+  DEFAULT_MAX_WINDOW_MINUTES,
 } from "./load.ts";
-export type { FolderValidation, BisyncSettings } from "./load.ts";
+export type { FolderValidation, BisyncSettings, SyncSettings, SyncMode, EffectiveSync } from "./load.ts";
 export type {
   ApplyPlan,
   ApplyOpts,

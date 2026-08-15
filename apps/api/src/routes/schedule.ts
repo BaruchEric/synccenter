@@ -11,8 +11,9 @@ import type { SchedulePlan } from "@synccenter/apply-planner";
 import type { ApiConfig } from "../config.ts";
 import { listYamlNames } from "../lib/fs.ts";
 import { buildFolderPlanFor } from "../lib/plan.ts";
+import type { SyncWindowEngine } from "../lib/sync-windows.ts";
 
-export function scheduleRouter(cfg: ApiConfig): Router {
+export function scheduleRouter(cfg: ApiConfig, engine: SyncWindowEngine): Router {
   const router = Router();
 
   /** The same SchedulePlan the crontab is rendered from, as JSON for the UI. */
@@ -30,7 +31,13 @@ export function scheduleRouter(cfg: ApiConfig): Router {
         if (!folderHasRcloneMember(folder, hosts)) continue;
         jobs.push(...buildFolderPlanFor(cfg, folder, hosts, secrets).schedule);
       }
-      res.json({ jobs });
+      // Syncthing sync windows are scheduled work too — the cron-driven kind
+      // the engine opens itself, as opposed to the crontab-rendered rclone legs.
+      const windows = engine
+        .syncJobs()
+        .filter((j) => j.mode === "scheduled" && j.cron)
+        .map((j) => ({ folder: j.folder, host: j.host, cron: j.cron!, maxWindowMinutes: j.maxWindowMinutes }));
+      res.json({ jobs, windows });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }

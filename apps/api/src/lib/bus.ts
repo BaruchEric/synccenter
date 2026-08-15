@@ -1,4 +1,5 @@
 import type { RunView } from "./runs-service.ts";
+import type { WindowView } from "./windows-service.ts";
 
 /**
  * What changed. Every connected browser gets these over SSE, so a run started
@@ -7,6 +8,7 @@ import type { RunView } from "./runs-service.ts";
  */
 export type ScEvent =
   | { type: "run"; run: RunView }
+  | { type: "window"; window: WindowView }
   | { type: "folder"; folder: string; action: FolderAction }
   | { type: "ping" };
 
