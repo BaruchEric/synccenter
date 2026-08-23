@@ -34,6 +34,54 @@ describe("computeDelta", () => {
     expect(delta.liveOnly).toEqual([{ host: "mac-studio", folderId: "ghost" }]);
   });
 
+  it("returns divergent when the plan declares versioning the live folder lacks", () => {
+    const withVersioning: ApplyPlan = {
+      ...PLAN,
+      perHost: {
+        "mac-studio": [
+          {
+            kind: "addFolder",
+            host: "mac-studio",
+            folder: {
+              id: "test", label: "test", path: "/p/mac", type: "sendreceive", devices: [{ deviceID: "X" }],
+              versioning: { type: "staggered", params: { maxAge: "2592000", cleanInterval: "3600", versionsPath: "" } },
+            },
+          },
+        ] as SyncthingOp[],
+      },
+    };
+    const off = computeDelta(withVersioning, {
+      "mac-studio": {
+        folder: { id: "test", label: "test", path: "/p/mac", type: "sendreceive", devices: [{ deviceID: "X" }], versioning: { type: "", params: {} } },
+        ignores: [],
+      },
+    });
+    expect(off.divergent.map((d) => d.path)).toEqual(["perHost.mac-studio.folder.versioning"]);
+    // Live returns extra params (fsPath, cleanupIntervalS live on the folder,
+    // not in params); only the planned type and params count.
+    const matching = computeDelta(withVersioning, {
+      "mac-studio": {
+        folder: {
+          id: "test", label: "test", path: "/p/mac", type: "sendreceive", devices: [{ deviceID: "X" }],
+          versioning: { type: "staggered", params: { maxAge: "2592000", cleanInterval: "3600", versionsPath: "" }, cleanupIntervalS: 3600, fsPath: "", fsType: "basic" },
+        },
+        ignores: [],
+      },
+    });
+    expect(matching.divergent).toEqual([]);
+    // A hand-armed folder that never wrote cleanInterval/versionsPath behaves as
+    // the defaults the plan asks for; a different maxAge is still drift.
+    const armedByHand = (maxAge: string) =>
+      computeDelta(withVersioning, {
+        "mac-studio": {
+          folder: { id: "test", label: "test", path: "/p/mac", type: "sendreceive", devices: [{ deviceID: "X" }], versioning: { type: "staggered", params: { maxAge, cleanoutDays: "30" } } },
+          ignores: [],
+        },
+      });
+    expect(armedByHand("2592000").divergent).toEqual([]);
+    expect(armedByHand("86400").divergent.map((d) => d.path)).toEqual(["perHost.mac-studio.folder.versioning"]);
+  });
+
   it("returns divergent when path differs between plan and live", () => {
     const delta = computeDelta(PLAN, {
       "mac-studio": {

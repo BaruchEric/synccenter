@@ -1,5 +1,6 @@
 import { mapPolicy } from "./conflict.ts";
 import { buildSchedulePlan } from "./schedule.ts";
+import { toSyncthingVersioning } from "./versioning.ts";
 import { PlanError } from "./errors.ts";
 import { effectiveSync, isRcloneHost, type FolderManifest, type HostManifest, type RcloneHostManifest, type SyncthingHostManifest } from "./load.ts";
 import type {
@@ -127,6 +128,11 @@ export function plan(args: PlanArgs): ApplyPlan {
     const ignorePerms = ov.ignore_perms ?? folder.ignore_perms;
     let fsWatcherEnabled = ov.fs_watcher_enabled ?? folder.fs_watcher_enabled;
     const fsWatcherDelay = ov.fs_watcher_delay_s ?? folder.fs_watcher_delay_s;
+    // Declared policy travels with the folder. Before 2026-08-22 the planner
+    // parsed `versioning:` and dropped it here, and since POST /rest/config/
+    // folders replaces an existing folder wholesale, every re-apply reset the
+    // live folder to no versioning (arik, dev and memory-vault all lost theirs).
+    const versioning = toSyncthingVersioning(ov.versioning ?? folder.versioning, folder.name);
 
     // A scheduled/manual member exists to NOT work between windows: the watcher
     // goes off and the periodic rescan gets pushed out to daily, so the only
@@ -167,6 +173,7 @@ export function plan(args: PlanArgs): ApplyPlan {
       ...(fsWatcherEnabled !== undefined && { fsWatcherEnabled }),
       ...(fsWatcherDelay !== undefined && { fsWatcherDelayS: fsWatcherDelay }),
       ...(rescanIntervalS !== undefined && { rescanIntervalS }),
+      ...(versioning !== undefined && { versioning }),
     };
     ops.push({ kind: "addFolder", host: hostName as HostName, folder: folderConfig });
     // Set ignores.

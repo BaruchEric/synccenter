@@ -85,9 +85,12 @@ folder already exists on every host, this list does not.
    share first (`/sbin/addshare <Name> /share/CACHEDEV1_DATA/<Name> -aw -uw:<user>`)
    or point the manifest at the volume path `/share/CACHEDEV1_DATA/<name>`.
 4. `sc folders apply <folder>` adds the peer devices, the folder and the
-   ignores on every Syncthing member. It does NOT carry `versioning:` (open
-   bug): PATCH `/rest/config/folders/<id>` with the staggered block on each
-   member and read it back.
+   ignores on every Syncthing member, and since 2026-08-22 the `versioning:`
+   block too (`maxAge: 30d` lands as Syncthing's `"2592000"`). Before that fix
+   the planner dropped the block and apply re-POSTed the folder, which
+   Syncthing treats as a replace, so every apply reset versioning to none;
+   read it back once with `GET /rest/config/folders/<id>` if the API on the
+   QNAP predates the fix.
 5. Copy the compiled filter to
    `/share/Container/synccenter/rclone-config/filters/<ruleset>.rclone` on the
    QNAP and rsync the config repo (minus `.git`) to

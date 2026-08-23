@@ -35,7 +35,15 @@
           ],
           "ignorePerms": true,
           "fsWatcherEnabled": true,
-          "fsWatcherDelayS": 10
+          "fsWatcherDelayS": 10,
+          "versioning": {
+            "type": "staggered",
+            "params": {
+              "maxAge": "2592000",
+              "cleanInterval": "3600",
+              "versionsPath": ""
+            }
+          }
         }
       },
       {
@@ -82,7 +90,15 @@
           ],
           "ignorePerms": true,
           "fsWatcherEnabled": true,
-          "fsWatcherDelayS": 10
+          "fsWatcherDelayS": 10,
+          "versioning": {
+            "type": "staggered",
+            "params": {
+              "maxAge": "2592000",
+              "cleanInterval": "3600",
+              "versionsPath": ""
+            }
+          }
         }
       },
       {
@@ -129,7 +145,15 @@
           ],
           "ignorePerms": true,
           "fsWatcherEnabled": true,
-          "fsWatcherDelayS": 10
+          "fsWatcherDelayS": 10,
+          "versioning": {
+            "type": "staggered",
+            "params": {
+              "maxAge": "2592000",
+              "cleanInterval": "3600",
+              "versionsPath": ""
+            }
+          }
         }
       },
       {

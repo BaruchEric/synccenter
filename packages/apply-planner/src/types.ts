@@ -9,6 +9,19 @@ export interface SyncthingFolderDevice {
   deviceID: string;
 }
 
+/**
+ * Syncthing's `folder.versioning` on the wire. `type: ""` is Syncthing's value
+ * for no versioning; every param is a string (staggered maxAge/cleanInterval
+ * in seconds).
+ */
+export interface SyncthingVersioningConfig {
+  type: "" | "trash" | "simple" | "staggered" | "external";
+  params: Record<string, string>;
+  cleanupIntervalS?: number;
+  fsPath?: string;
+  fsType?: string;
+}
+
 export interface SyncthingFolderConfig {
   id: string;
   label: string;
@@ -20,6 +33,8 @@ export interface SyncthingFolderConfig {
   fsWatcherDelayS?: number;
   rescanIntervalS?: number;
   paused?: boolean;
+  /** Present when the manifest declares `versioning:`; absent means unmanaged. */
+  versioning?: SyncthingVersioningConfig;
 }
 
 export type SyncthingOp =

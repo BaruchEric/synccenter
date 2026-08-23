@@ -235,7 +235,9 @@ async function collectLiveState(
         ...(live.ignorePerms !== undefined && { ignorePerms: live.ignorePerms }),
         ...(live.fsWatcherEnabled !== undefined && { fsWatcherEnabled: live.fsWatcherEnabled }),
         ...(live.fsWatcherDelayS !== undefined && { fsWatcherDelayS: live.fsWatcherDelayS }),
+        ...(live.rescanIntervalS !== undefined && { rescanIntervalS: live.rescanIntervalS }),
         ...(live.paused !== undefined && { paused: live.paused }),
+        ...(live.versioning !== undefined && { versioning: live.versioning }),
       };
     } catch {
       /* 404 — folder not present on this host */

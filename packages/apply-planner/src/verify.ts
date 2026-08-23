@@ -1,5 +1,5 @@
 import { computeDelta, type LiveState } from "./delta.ts";
-import type { AdapterPool, ApplyPlan, DriftReport, HostName, SyncthingFolderConfig } from "./types.ts";
+import type { AdapterPool, ApplyPlan, DriftReport, HostName, SyncthingFolderConfig, SyncthingVersioningConfig } from "./types.ts";
 
 export interface VerifyResult {
   verified: boolean;
@@ -42,7 +42,19 @@ export async function verify(p: ApplyPlan, pool: AdapterPool): Promise<VerifyRes
   return { verified, report };
 }
 
-function normalizeFolder(raw: { id: string; label?: string; path: string; type: SyncthingFolderConfig["type"]; devices: { deviceID: string }[]; paused?: boolean; fsWatcherEnabled?: boolean; fsWatcherDelayS?: number; rescanIntervalS?: number; ignorePerms?: boolean }): SyncthingFolderConfig {
+function normalizeFolder(raw: {
+  id: string;
+  label?: string;
+  path: string;
+  type: SyncthingFolderConfig["type"];
+  devices: { deviceID: string }[];
+  paused?: boolean;
+  fsWatcherEnabled?: boolean;
+  fsWatcherDelayS?: number;
+  rescanIntervalS?: number;
+  ignorePerms?: boolean;
+  versioning?: SyncthingVersioningConfig;
+}): SyncthingFolderConfig {
   return {
     id: raw.id,
     label: raw.label ?? raw.id,
@@ -54,5 +66,6 @@ function normalizeFolder(raw: { id: string; label?: string; path: string; type: 
     fsWatcherDelayS: raw.fsWatcherDelayS,
     rescanIntervalS: raw.rescanIntervalS,
     ignorePerms: raw.ignorePerms,
+    versioning: raw.versioning,
   };
 }

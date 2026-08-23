@@ -2,13 +2,17 @@ import { describe, it, expect, mock } from "bun:test";
 import { apply } from "../src/apply.ts";
 import type { ApplyPlan, AdapterPool, SyncthingFolderConfig } from "../src/types.ts";
 
-function makePool(perHost: Record<string, { addFolder: any; setIgnores: any; addDevice: any; patchFolder: any }>): AdapterPool {
+const NOT_FOUND = Object.assign(new Error("404"), { status: 404 });
+
+function makePool(perHost: Record<string, { addFolder: any; setIgnores: any; addDevice: any; patchFolder: any; getFolder?: any }>): AdapterPool {
   return {
     syncthing: (host) => ({
       addFolder: perHost[host]?.addFolder ?? (async () => undefined),
       setIgnores: perHost[host]?.setIgnores ?? (async () => undefined),
       addDevice: perHost[host]?.addDevice ?? (async () => undefined),
       patchFolder: perHost[host]?.patchFolder ?? (async () => undefined),
+      // Default: the folder is not on the host yet, so addFolder POSTs.
+      getFolder: perHost[host]?.getFolder ?? (async () => { throw NOT_FOUND; }),
     } as any),
     rclone: () => ({} as any),
   };
@@ -65,6 +69,34 @@ describe("apply", () => {
     expect(mac?.error?.message).toContain("ALL ignore rules are inactive");
     // A rejected pattern is not transient — it must not be retried.
     expect(setIgnores).toHaveBeenCalledTimes(1);
+  });
+
+  // POST /rest/config/folders replaces an existing folder wholesale, which is
+  // how every re-apply wiped versioning (and anything else unmanaged) until
+  // 2026-08-22. An existing folder must be PATCHed, never re-POSTed.
+  it("PATCHes an existing folder instead of re-POSTing it", async () => {
+    const add = mock(async () => undefined);
+    const patch = mock(async (_id: string, _cfg: SyncthingFolderConfig) => undefined);
+    const pool = makePool({
+      "mac": { addFolder: add, patchFolder: patch, setIgnores: async () => undefined, addDevice: async () => undefined, getFolder: async () => ({ ...BASE_FOLDER, paused: false }) },
+      "qnap": { addFolder: add, patchFolder: patch, setIgnores: async () => undefined, addDevice: async () => undefined },
+    });
+    const res = await apply(PLAN_TWO_HOSTS, pool, {});
+    expect(res.hosts.every((h) => h.status === "applied")).toBe(true);
+    // mac had the folder: one PATCH with the planned config; qnap did not: one POST.
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(patch).toHaveBeenCalledWith("test", BASE_FOLDER);
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the host when the existence check fails for a reason other than 404", async () => {
+    const add = mock(async () => undefined);
+    const pool = makePool({
+      "mac": { addFolder: add, patchFolder: async () => undefined, setIgnores: async () => undefined, addDevice: async () => undefined, getFolder: async () => { throw Object.assign(new Error("401"), { status: 401 }); } },
+    });
+    const res = await apply(PLAN_TWO_HOSTS, pool, {});
+    expect(res.hosts.find((h) => h.host === "mac")?.status).toBe("failed");
+    expect(add).toHaveBeenCalledTimes(0);
   });
 
   it("dryRun returns 'skipped' for every host and calls nothing", async () => {

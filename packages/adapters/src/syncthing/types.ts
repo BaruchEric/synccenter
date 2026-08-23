@@ -38,6 +38,15 @@ export interface SyncthingDeviceConfig {
   paused: boolean;
 }
 
+/** `folder.versioning` as Syncthing stores it: empty type = off, string params. */
+export interface SyncthingVersioning {
+  type: "" | "trash" | "simple" | "staggered" | "external";
+  params: Record<string, string>;
+  cleanupIntervalS?: number;
+  fsPath?: string;
+  fsType?: string;
+}
+
 export interface SyncthingFolderConfig {
   id: string;
   label?: string;
@@ -49,6 +58,7 @@ export interface SyncthingFolderConfig {
   fsWatcherDelayS?: number;
   rescanIntervalS?: number;
   ignorePerms?: boolean;
+  versioning?: SyncthingVersioning;
 }
 
 export interface SyncthingFolderStatus {
@@ -140,6 +150,7 @@ export interface NewSyncthingFolder {
   fsWatcherDelayS?: number;
   rescanIntervalS?: number;
   ignorePerms?: boolean;
+  versioning?: SyncthingVersioning;
 }
 
 /** Subset of fields needed to add a device. */

@@ -1,4 +1,5 @@
 import type { ApplyPlan, DriftReport, HostName, SyncthingFolderConfig, SyncthingOp } from "./types.ts";
+import { defaultVersioningParam } from "./versioning.ts";
 
 export interface LiveHostState {
   folder: SyncthingFolderConfig | null;
@@ -84,6 +85,28 @@ function compareFolderFields(
     const a = actual[f];
     if (e !== undefined && e !== a) {
       out.push({ host, path: `perHost.${host}.folder.${f}`, expected: e, actual: a });
+    }
+  }
+  // Versioning: compare the type and every param the plan sets. Live Syncthing
+  // returns extra params (and `type: ""` for off); those are not drift. A param
+  // the live folder omits counts as Syncthing's default for it (that is how the
+  // daemon behaves), so a hand-armed folder that never wrote cleanInterval is
+  // not flagged when the plan wants the default 3600.
+  if (expected.versioning !== undefined) {
+    const e = expected.versioning;
+    const a = actual.versioning;
+    const typeDiffers = (a?.type ?? "") !== e.type;
+    const paramDiffers = Object.entries(e.params).some(([k, v]) => {
+      const live = a?.params?.[k] ?? defaultVersioningParam(e.type, k) ?? "";
+      return live !== v;
+    });
+    if (typeDiffers || paramDiffers) {
+      out.push({
+        host,
+        path: `perHost.${host}.folder.versioning`,
+        expected: e,
+        actual: a ? { type: a.type, params: a.params } : null,
+      });
     }
   }
 }

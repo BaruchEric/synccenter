@@ -11,7 +11,8 @@ export type PlanErrorCode =
   | "ANCHOR_NOT_SYNCTHING"
   | "ANCHOR_NOT_IN_PATHS"
   | "SECRET_REF_INVALID"
-  | "SOPS_DECRYPT_FAILED";
+  | "SOPS_DECRYPT_FAILED"
+  | "VERSIONING_INVALID";
 
 export type DriftErrorCode =
   | "LIVE_ONLY_FOLDER"

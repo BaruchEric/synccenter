@@ -1,3 +1,4 @@
+import type { SyncthingClient } from "@synccenter/adapters/syncthing";
 import type { AdapterPool, ApplyOpts, ApplyPlan, ApplyResult, HostApplyResult, HostName, SyncthingOp } from "./types.ts";
 
 export async function apply(p: ApplyPlan, pool: AdapterPool, opts: ApplyOpts): Promise<ApplyResult> {
@@ -39,7 +40,16 @@ async function executeOps(host: HostName, ops: SyncthingOp[], pool: AdapterPool)
         await retry(() => client.addDevice({ deviceID: op.deviceID, name: op.name, addresses: op.addresses ?? ["dynamic"] }));
         break;
       case "addFolder":
-        await retry(() => client.addFolder(op.folder));
+        // POST /rest/config/folders REPLACES a folder of the same id wholesale,
+        // so every field the planner does not manage (paused, minDiskFree, and
+        // until 2026-08-22 versioning) snapped back to defaults on each re-apply.
+        // An existing folder gets a PATCH of the managed fields; only a missing
+        // one is created.
+        if (await folderExists(client, op.folder.id)) {
+          await retry(() => client.patchFolder(op.folder.id, op.folder));
+        } else {
+          await retry(() => client.addFolder(op.folder));
+        }
         break;
       case "patchFolder":
         await retry(() => client.patchFolder(op.folderId, op.patch));
@@ -63,6 +73,17 @@ async function executeOps(host: HostName, ops: SyncthingOp[], pool: AdapterPool)
         await retry(() => client.removeFolder(op.folderId));
         break;
     }
+  }
+}
+
+/** 404 means "not on this host"; anything else (timeout, auth, 5xx) is a real failure. */
+async function folderExists(client: SyncthingClient, id: string): Promise<boolean> {
+  try {
+    await retry(() => client.getFolder(id));
+    return true;
+  } catch (err) {
+    if ((err as { status?: number }).status === 404) return false;
+    throw err;
   }
 }
 
