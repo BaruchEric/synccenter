@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, heldMembers, type FolderManifest } from "@/lib/api";
+import { api, heldMembers, type FolderManifest, type SyncNowResult } from "@/lib/api";
 
 /**
  * The verbs for one folder. Two tiers, because they are not equally safe:
- * Run/Apply/Pause act on the running mesh and are reversible; Disable and
- * Delete change committed config, so Delete asks twice and says what it will
- * not touch.
+ * Sync now/Apply/Pause act on the running mesh and are reversible; Disable
+ * and Delete change committed config, so Delete asks twice and says what it
+ * will not touch.
+ *
+ * "Sync now" means every leg: a window on each held Syncthing member, then
+ * the bisync to each cloud member once those windows close. "Cloud only"
+ * is the bisync on its own, for when the mesh is already caught up.
  */
 export function FolderActions({
   name,
@@ -24,6 +28,8 @@ export function FolderActions({
   const [note, setNote] = useState<{ tone: "ok" | "fail"; text: string } | null>(null);
 
   const disabled = manifest?.enabled === false;
+  const held = manifest ? heldMembers(manifest) : [];
+  const canSync = held.length > 0 || hasCloudMember === true;
 
   const refresh = () => {
     for (const k of ["folders", "folder", "folder-state", "schedule", "apply-history"]) {
@@ -33,12 +39,12 @@ export function FolderActions({
   };
 
   const run = useMutation({
-    mutationFn: async (verb: Verb) => {
+    mutationFn: async (verb: Verb): Promise<unknown> => {
       switch (verb) {
         case "bisync":
           return api.post(`/folders/${encodeURIComponent(name)}/bisync?async=true`);
         case "sync":
-          return api.post(`/folders/${encodeURIComponent(name)}/sync`);
+          return api.post<SyncNowResult>(`/folders/${encodeURIComponent(name)}/sync`);
         case "apply":
           return api.post(`/folders/${encodeURIComponent(name)}/apply`, { confirm: true });
         case "pause":
@@ -51,8 +57,13 @@ export function FolderActions({
           return api.del(`/folders/${encodeURIComponent(name)}`, { confirm: true });
       }
     },
-    onSuccess: (_d, verb) => {
-      setNote({ tone: "ok", text: DONE[verb] });
+    onSuccess: (data, verb) => {
+      if (verb === "sync" && isSyncNowResult(data)) {
+        const said = describeSyncNow(data);
+        setNote(said);
+      } else {
+        setNote({ tone: "ok", text: DONE[verb] });
+      }
       setConfirmingDelete(false);
       refresh();
     },
@@ -65,16 +76,34 @@ export function FolderActions({
     run.mutate(v);
   };
 
+  // `contents`: the buttons and the note join the caller's flex row, so a
+  // full-width note drops below the whole verb line instead of pushing the
+  // caller's own Edit link onto a line of its own.
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {hasCloudMember && (
-        <Action onClick={fire("bisync")} disabled={busy || disabled} primary>
-          Run
+    <div className="contents">
+      {canSync && (
+        <Action
+          onClick={fire("sync")}
+          disabled={busy || disabled}
+          primary
+          title={
+            held.length > 0 && hasCloudMember
+              ? `Open a sync window on ${held.join(", ")}, then bisync to the cloud member when it closes`
+              : held.length > 0
+                ? `Open a sync window on ${held.join(", ")}`
+                : "Run the bisync to the cloud member now"
+          }
+        >
+          Sync now
         </Action>
       )}
-      {manifest && heldMembers(manifest).length > 0 && (
-        <Action onClick={fire("sync")} disabled={busy || disabled} primary>
-          Sync now
+      {hasCloudMember && held.length > 0 && (
+        <Action
+          onClick={fire("bisync")}
+          disabled={busy || disabled}
+          title="Bisync to the cloud member without opening a sync window first"
+        >
+          Cloud only
         </Action>
       )}
       <Action onClick={fire("apply")} disabled={busy || disabled}>
@@ -122,8 +151,8 @@ export function FolderActions({
 type Verb = "bisync" | "sync" | "apply" | "pause" | "resume" | "enable" | "disable" | "delete";
 
 const DONE: Record<Verb, string> = {
-  bisync: "Bisync started on the anchor.",
-  sync: "Sync window opened — watch it on the timeline.",
+  bisync: "Bisync started on the anchor — watch it on the timeline.",
+  sync: "Sync started — watch it on the timeline.",
   apply: "Applied to every host.",
   pause: "Paused.",
   resume: "Resumed.",
@@ -132,18 +161,51 @@ const DONE: Record<Verb, string> = {
   delete: "Manifest deleted.",
 };
 
+function isSyncNowResult(v: unknown): v is SyncNowResult {
+  return typeof v === "object" && v !== null && "windows" in v && "cloud" in v;
+}
+
+/** One sentence on what Sync now set in motion, leg by leg. */
+function describeSyncNow(r: SyncNowResult): { tone: "ok" | "fail"; text: string } {
+  const parts: string[] = [];
+  let tone: "ok" | "fail" = "ok";
+  const open = r.windows.filter((w) => w.state === "running");
+  if (open.length > 0) parts.push(`window open on ${open.map((w) => w.host).join(", ")}`);
+  for (const w of r.windows.filter((x) => x.state !== "running")) {
+    parts.push(`window on ${w.host} ${w.state}${w.error ? ` (${w.error})` : ""}`);
+    if (w.state === "failed") tone = "fail";
+  }
+  for (const f of r.failed) {
+    parts.push(`${f.host}: ${f.error}`);
+    tone = "fail";
+  }
+  if (r.cloud?.status === "queued") {
+    parts.push(`bisync → ${r.cloud.members.join(", ")} follows when it closes`);
+  } else if (r.cloud?.status === "started") {
+    for (const run of r.cloud.runs) parts.push(`bisync → ${run.member ?? "cloud"} started`);
+    for (const e of r.cloud.errors) {
+      parts.push(`bisync → ${e.member} did not start: ${e.error}`);
+      tone = "fail";
+    }
+  }
+  const text = parts.length > 0 ? parts.join(" · ") : "nothing to do";
+  return { tone, text: `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}.` };
+}
+
 function Action({
   children,
   onClick,
   disabled,
   primary,
   danger,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   primary?: boolean;
   danger?: boolean;
+  title?: string;
 }) {
   const tone = primary
     ? "border-signal/60 text-signal hover:bg-signal/10"
@@ -155,6 +217,7 @@ function Action({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={`rounded border px-2 py-0.5 font-mono text-[11px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-signal disabled:cursor-not-allowed disabled:opacity-40 ${tone}`}
     >
       {children}

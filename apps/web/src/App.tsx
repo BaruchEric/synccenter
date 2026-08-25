@@ -10,6 +10,8 @@ import { FolderEdit } from "@/routes/FolderEdit";
 import { Rules } from "@/routes/Rules";
 import { Hosts } from "@/routes/Hosts";
 import { Conflicts } from "@/routes/Conflicts";
+import { History } from "@/routes/History";
+import { Logs } from "@/routes/Logs";
 import { LiveProvider } from "@/lib/live";
 
 const qc = new QueryClient({
@@ -42,6 +44,8 @@ export function App() {
               <Route path="folders/new" element={<FolderEdit />} />
               <Route path="folders/:name" element={<FolderDetail />} />
               <Route path="folders/:name/edit" element={<FolderEdit />} />
+              <Route path="history" element={<History />} />
+              <Route path="logs" element={<Logs />} />
               <Route path="rules" element={<Rules />} />
               <Route path="hosts" element={<Hosts />} />
               <Route path="conflicts" element={<Conflicts />} />

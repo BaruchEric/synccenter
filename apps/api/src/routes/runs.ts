@@ -2,16 +2,26 @@ import { Router } from "express";
 import { RcloneClient, RcloneError } from "@synccenter/adapters";
 import type { Db } from "../db.ts";
 import type { EventBus } from "../lib/bus.ts";
-import { finishRun, getRun, listRuns, toView } from "../lib/runs-service.ts";
+import { finishRun, getRun, listActiveRuns, listRuns, toView } from "../lib/runs-service.ts";
 
 export function runsRouter(db: Db, bus: EventBus, rclone: RcloneClient | null): Router {
   const r = Router();
 
   r.get("/runs", (req, res) => {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 50) || 50));
-    const rows = listRuns(db, limit);
-    const active = rows.filter((x) => x.state === "running");
-    res.json({ runs: rows.map(toView), activeCount: active.length });
+    const before = Number(req.query.before);
+    const folder = typeof req.query.folder === "string" ? req.query.folder : undefined;
+    const rows = listRuns(db, {
+      limit,
+      ...(Number.isInteger(before) && before > 0 ? { before } : {}),
+      ...(folder ? { folder } : {}),
+    });
+    res.json({
+      runs: rows.map(toView),
+      activeCount: listActiveRuns(db).length,
+      // Cursor for the next page; null once the page came back short.
+      nextBefore: rows.length === limit ? rows[rows.length - 1]!.id : null,
+    });
   });
 
   r.get("/runs/:id", (req, res) => {

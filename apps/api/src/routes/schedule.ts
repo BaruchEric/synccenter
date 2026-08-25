@@ -1,16 +1,7 @@
 import { Router } from "express";
-import { join } from "node:path";
-import {
-  loadFolderManifest,
-  loadAllHosts,
-  createSecretsResolver,
-  renderCrontab,
-  folderHasRcloneMember,
-} from "@synccenter/apply-planner";
-import type { SchedulePlan } from "@synccenter/apply-planner";
+import { renderCrontab } from "@synccenter/apply-planner";
 import type { ApiConfig } from "../config.ts";
-import { listYamlNames } from "../lib/fs.ts";
-import { buildFolderPlanFor } from "../lib/plan.ts";
+import { planScheduleJobs } from "../lib/plan.ts";
 import type { SyncWindowEngine } from "../lib/sync-windows.ts";
 
 export function scheduleRouter(cfg: ApiConfig, engine: SyncWindowEngine): Router {
@@ -20,9 +11,6 @@ export function scheduleRouter(cfg: ApiConfig, engine: SyncWindowEngine): Router
   router.get("/schedule", (_req, res) => {
     // Syncthing sync windows are scheduled work too — the cron-driven kind the
     // engine opens itself, as opposed to the crontab-rendered rclone legs.
-    // Computed first and never behind the secrets resolver: the bisync jobs
-    // below shell out to sops for device IDs, and the deployed API container
-    // has no sops — that must not blank the windows the engine WILL run.
     let windows: Array<{ folder: string; host: string; cron: string; maxWindowMinutes: number }>;
     try {
       windows = engine
@@ -34,45 +22,16 @@ export function scheduleRouter(cfg: ApiConfig, engine: SyncWindowEngine): Router
       return;
     }
 
-    try {
-      const hosts = loadAllHosts(cfg.hostsDir);
-      const secrets = createSecretsResolver({ configDir: cfg.configDir });
-      const names = listYamlNames(cfg.foldersDir).filter((n) => !n.startsWith("example-"));
-
-      const jobs: SchedulePlan[] = [];
-      for (const name of names) {
-        const folder = loadFolderManifest(join(cfg.foldersDir, `${name}.yaml`));
-        // A disabled folder keeps its manifest but contributes no cron lines.
-        if (folder.enabled === false) continue;
-        if (!folderHasRcloneMember(folder, hosts)) continue;
-        jobs.push(...buildFolderPlanFor(cfg, folder, hosts, secrets).schedule);
-      }
-      res.json({ jobs, windows });
-    } catch (err) {
-      res.json({ jobs: [], windows, jobsError: (err as Error).message });
-    }
+    // Planned from the manifests alone — no sops, no secrets — so the
+    // deployed container answers the same as a workstation would.
+    const { jobs, errors } = planScheduleJobs(cfg);
+    res.json({ jobs, windows, ...(errors.length > 0 ? { jobsError: errors.join("; ") } : {}) });
   });
 
   router.get("/schedule/crontab", (_req, res) => {
-    try {
-      const hosts = loadAllHosts(cfg.hostsDir);
-      const secrets = createSecretsResolver({ configDir: cfg.configDir });
-      const names = listYamlNames(cfg.foldersDir).filter((n) => !n.startsWith("example-"));
-
-      const allSchedule: SchedulePlan[] = [];
-      for (const name of names) {
-        const folder = loadFolderManifest(join(cfg.foldersDir, `${name}.yaml`));
-        // A disabled folder keeps its manifest but contributes no cron lines.
-        if (folder.enabled === false) continue;
-        if (!folderHasRcloneMember(folder, hosts)) continue;
-        const p = buildFolderPlanFor(cfg, folder, hosts, secrets);
-        allSchedule.push(...p.schedule);
-      }
-
-      res.type("text/plain").send(renderCrontab(allSchedule));
-    } catch (err) {
-      res.status(500).type("text/plain").send(`# error: ${(err as Error).message}\n`);
-    }
+    const { jobs, errors } = planScheduleJobs(cfg);
+    const banner = errors.map((e) => `# warning: ${e}\n`).join("");
+    res.type("text/plain").send(`${banner}${renderCrontab(jobs)}`);
   });
 
   return router;

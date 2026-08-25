@@ -249,3 +249,27 @@ describe("error handling", () => {
     expect((err as SyncthingError).status).toBeNull();
   });
 });
+
+describe("SyncthingClient log and folder errors", () => {
+  it("getSystemLog reads /rest/system/log, with an optional since", async () => {
+    const { client: c, calls } = client({
+      body: { messages: [{ when: "2026-08-25T10:00:00Z", message: "Ready to synchronize", level: 0 }] },
+    });
+    const log = await c.getSystemLog();
+    expect(calls[0]!.url).toBe("http://st.local:8384/rest/system/log");
+    expect(log.messages[0]!.message).toBe("Ready to synchronize");
+    await c.getSystemLog("2026-08-25T09:00:00Z");
+    expect(calls[1]!.url).toBe("http://st.local:8384/rest/system/log?since=2026-08-25T09%3A00%3A00Z");
+  });
+
+  it("getFolderErrors reads /rest/folder/errors for the folder, paged", async () => {
+    const { client: c, calls } = client({
+      body: { folder: "arik", errors: [{ path: "x/y.txt", error: "permission denied" }], page: 1, perpage: 100 },
+    });
+    const out = await c.getFolderErrors("arik");
+    expect(calls[0]!.url).toBe("http://st.local:8384/rest/folder/errors?folder=arik&page=1&perpage=100");
+    expect(out.errors).toEqual([{ path: "x/y.txt", error: "permission denied" }]);
+    await c.getFolderErrors("arik", 2, 50);
+    expect(calls[1]!.url).toBe("http://st.local:8384/rest/folder/errors?folder=arik&page=2&perpage=50");
+  });
+});

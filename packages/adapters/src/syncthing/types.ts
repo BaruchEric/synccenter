@@ -131,6 +131,31 @@ export interface SyncthingCompletion {
   remoteState?: string;
 }
 
+/** One entry of /rest/system/log. `level` is absent on older daemons. */
+export interface SyncthingLogEntry {
+  when: string;
+  message: string;
+  level?: number;
+}
+
+export interface SyncthingLog {
+  messages: SyncthingLogEntry[];
+}
+
+/** One failed item from /rest/folder/errors — a pull that keeps failing, and why. */
+export interface SyncthingFolderError {
+  path: string;
+  error: string;
+}
+
+export interface SyncthingFolderErrors {
+  folder: string;
+  /** null, not [], when the folder has nothing failing — Syncthing's choice. */
+  errors: SyncthingFolderError[] | null;
+  page: number;
+  perpage: number;
+}
+
 export interface SyncthingEvent {
   id: number;
   globalID: number;

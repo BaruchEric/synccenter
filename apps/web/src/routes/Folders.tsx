@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type FolderManifest, type FoldersList, type ScheduleList } from "@/lib/api";
 import { FolderActions } from "@/components/FolderActions";
-import { useFolderRuns } from "@/lib/live";
+import { cloudMembers, useRcloneHosts } from "@/lib/hosts";
+import { useFolderRuns, useFolderWindows } from "@/lib/live";
 import { nextRuns, relative } from "@/lib/cron";
 
 /**
@@ -21,8 +22,12 @@ export function Folders() {
   });
 
   const names = folders.data?.folders ?? [];
-  const cloud = new Set((schedule.data?.jobs ?? []).map((j) => j.folder));
+  // Cloud membership comes from the host manifests, not from whether the
+  // server managed to plan a crontab: the bisync button must exist for a
+  // folder with a Drive member whether or not the schedule could be read.
+  const { rclone } = useRcloneHosts();
   const crons = new Map((schedule.data?.jobs ?? []).map((j) => [j.folder, j.cron]));
+  const windowCrons = new Map((schedule.data?.windows ?? []).map((w) => [w.folder, w.cron]));
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -62,7 +67,13 @@ export function Folders() {
       {names.length > 0 && (
         <ul className="divide-y divide-rule rounded-lg border border-rule bg-panel">
           {names.map((name) => (
-            <Row key={name} name={name} hasCloud={cloud.has(name)} cron={crons.get(name)} />
+            <Row
+              key={name}
+              name={name}
+              rclone={rclone}
+              cron={crons.get(name)}
+              windowCron={windowCrons.get(name)}
+            />
           ))}
         </ul>
       )}
@@ -70,16 +81,33 @@ export function Folders() {
   );
 }
 
-function Row({ name, hasCloud, cron }: { name: string; hasCloud: boolean; cron?: string }) {
+function Row({
+  name,
+  rclone,
+  cron,
+  windowCron,
+}: {
+  name: string;
+  rclone: Set<string>;
+  cron?: string;
+  windowCron?: string;
+}) {
   const manifest = useQuery({
     queryKey: ["folder", name],
     queryFn: () => api.get<FolderManifest>(`/folders/${encodeURIComponent(name)}`),
     retry: false,
   });
   const runs = useFolderRuns(name);
+  const windows = useFolderWindows(name);
   const m = manifest.data;
   const disabled = m?.enabled === false;
-  const upcoming = cron ? nextRuns(cron, 1, new Date()) : [];
+  const hasCloud = cloudMembers(m, rclone).length > 0;
+  // The schedule endpoint knows the cron; the manifest is the fallback for
+  // when it could not be planned, and the two agree whenever both exist.
+  const bisyncCron = cron ?? m?.bisync?.schedule;
+  const now = new Date();
+  const nextBisync = bisyncCron ? nextRuns(bisyncCron, 1, now)[0] : undefined;
+  const nextWindow = windowCron ? nextRuns(windowCron, 1, now)[0] : undefined;
 
   return (
     <li className={`px-4 py-3 ${disabled ? "opacity-55" : ""}`}>
@@ -100,8 +128,13 @@ function Row({ name, hasCloud, cron }: { name: string; hasCloud: boolean; cron?:
         <div className="font-mono text-xs tabular-nums text-dim">
           {disabled
             ? "no scheduled runs"
-            : upcoming.length > 0
-              ? `next ${relative(upcoming[0]!, new Date())}`
+            : nextBisync || nextWindow
+              ? [
+                  nextWindow ? `window ${relative(nextWindow, now)}` : null,
+                  nextBisync ? `bisync ${relative(nextBisync, now)}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
               : hasCloud
                 ? "no schedule"
                 : "local mesh only"}
@@ -118,9 +151,15 @@ function Row({ name, hasCloud, cron }: { name: string; hasCloud: boolean; cron?:
         </div>
       )}
 
+      {windows.map((w) => (
+        <p key={`w-${w.id}`} className="mt-1 font-mono text-[11px] text-run">
+          window open on {w.host} — {w.phase}
+          {w.fraction != null && w.phase !== "scanning" ? ` · ${Math.round(w.fraction * 100)}% in sync` : ""}
+        </p>
+      ))}
       {runs.map((r) => (
         <p key={r.id} className="mt-1 font-mono text-[11px] text-signal">
-          running now — {r.phase === "transferring" ? `${Math.round((r.fraction ?? 0) * 100)}%` : "checking"}
+          bisync → {r.member ?? "cloud"} running — {r.phase === "transferring" ? `${Math.round((r.fraction ?? 0) * 100)}%` : "checking"}
         </p>
       ))}
 

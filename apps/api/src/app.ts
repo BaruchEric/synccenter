@@ -14,11 +14,15 @@ const WEB_MOUNT = "/app";
 
 import type { ApiConfig } from "./config.ts";
 import { openDb, type Db } from "./db.ts";
+import { startBisync } from "./lib/bisync-service.ts";
 import { EventBus } from "./lib/bus.ts";
+import { Log } from "./lib/log.ts";
 import { RunTracker } from "./lib/run-tracker.ts";
 import { abandonStaleRuns } from "./lib/runs-service.ts";
+import { SyncNow } from "./lib/sync-now.ts";
 import { SyncWindowEngine } from "./lib/sync-windows.ts";
 import { abandonStaleWindows } from "./lib/windows-service.ts";
+import { logRouter } from "./routes/log.ts";
 import { windowsRouter } from "./routes/windows.ts";
 import { metricsHandlerFactory } from "./metrics.ts";
 import { foldersRouter } from "./routes/folders.ts";
@@ -43,6 +47,11 @@ export interface BuildAppDeps {
   rclone?: RcloneClient | null;
   /** Injectable fetch for the gitignore-importer (tests). */
   importerFetch?: typeof fetch;
+  /**
+   * Mirror the server log to stdout/stderr. The entrypoint turns this on so
+   * `docker logs` keeps telling the story; tests leave it off.
+   */
+  logStdout?: boolean;
 }
 
 export interface BuiltApp {
@@ -62,9 +71,13 @@ export interface BuiltApp {
    * tracker: built stopped, started only by the entrypoint.
    */
   engine: SyncWindowEngine;
+  /** The server's own log: SQLite-backed, pushed over /events. */
+  log: Log;
+  /** Sync now, every leg: windows first, then the cloud bisync. */
+  syncNow: SyncNow;
 }
 
-export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppDeps): BuiltApp {
+export function buildApp({ cfg, db, registry, rclone, importerFetch, logStdout }: BuildAppDeps): BuiltApp {
   const database = db ?? openDb(cfg.dbPath);
   const reg = registry ?? new HostRegistry({ cfg });
   const rcloneClient =
@@ -79,13 +92,33 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
         : null
       : rclone;
   const bus = new EventBus();
+  const log = new Log(database, bus, { stdout: logStdout === true });
   // Job ids do not survive a restart of either process, so any run still marked
   // running belongs to a job we can no longer identify. Close them out rather
   // than polling ids that may since have been handed to something else.
-  abandonStaleRuns(database);
-  abandonStaleWindows(database);
-  const tracker = new RunTracker({ db: database, bus, rclone: rcloneClient });
-  const engine = new SyncWindowEngine({ cfg, db: database, bus, registry: reg });
+  const staleRuns = abandonStaleRuns(database);
+  const staleWindows = abandonStaleWindows(database);
+  log.info(
+    "system",
+    `SyncCenter ${PKG_VERSION} started${
+      staleRuns + staleWindows > 0
+        ? ` — closed out ${staleRuns} bisync run(s) and ${staleWindows} sync window(s) left open by the previous process`
+        : ""
+    }`,
+    { data: { version: PKG_VERSION, rclone: rcloneClient !== null, staleRuns, staleWindows } },
+  );
+  const tracker = new RunTracker({ db: database, bus, rclone: rcloneClient, log });
+  const engine = new SyncWindowEngine({ cfg, db: database, bus, registry: reg, log });
+  const syncNow = new SyncNow({
+    cfg,
+    db: database,
+    bus,
+    log,
+    registry: reg,
+    engine,
+    bisync: (folder, opts) =>
+      startBisync({ cfg, db: database, registry: reg, rclone: rcloneClient, bus, log }, folder, opts),
+  });
   tracker.onFinished = (run) => {
     database.run(
       `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
@@ -171,10 +204,11 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
 
   app.use(bearerAuth(cfg.apiToken));
 
-  app.use("/", foldersRouter(cfg, reg, database, rcloneClient, bus, engine));
+  app.use("/", foldersRouter(cfg, reg, database, rcloneClient, bus, engine, log, syncNow));
   app.use("/", runsRouter(database, bus, rcloneClient));
   app.use("/", windowsRouter(database, engine));
   app.use("/", eventsRouter(database, bus));
+  app.use("/", logRouter(log));
   app.use("/", rulesRouter(cfg));
   app.use("/", hostsRouter(cfg, reg));
   app.use("/", rcloneRouter(rcloneClient));
@@ -190,7 +224,7 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch }: BuildAppD
     res.status(500).json({ error: message });
   });
 
-  return { app, db: database, registry: reg, rclone: rcloneClient, bus, tracker, engine };
+  return { app, db: database, registry: reg, rclone: rcloneClient, bus, tracker, engine, log, syncNow };
 }
 
 /** Human-readable byte count for the history note. */

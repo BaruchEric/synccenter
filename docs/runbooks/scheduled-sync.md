@@ -46,12 +46,41 @@ The engine lives inside the API server (`SyncWindowEngine`, started in
 
 ## Driving it
 
-- UI: folders with a held member get a **Sync now** action; open windows draw
-  a live band on the activity timeline (progress, peers caught up, close
-  button), and held members read `held · scheduled` instead of `paused`.
-- API: `POST /folders/<name>/sync[?host=…]`, `GET /windows`,
+- UI: folders with a held member or a cloud member get a **Sync now** action;
+  open windows draw a live band on the activity timeline (progress, peers
+  caught up, close button), and held members read `held · scheduled` instead
+  of `paused`. **Cloud only** runs the bisync without opening a window first.
+- API: `POST /folders/<name>/sync[?host=…][&cloud=false]`, `GET /windows`,
   `POST /windows/<id>/stop`. `GET /schedule` lists window crons under `windows`.
-- CLI: `sc sync <folder> [--host <host>]`, `sc windows`.
+- CLI: `sc sync <folder> [--host <host>] [--no-cloud]`, `sc windows`.
+  MCP: `sc_sync_folder`.
+
+## Sync now runs every leg
+
+A folder such as `baruchrio` has two legs: Mac ↔ NAS over Syncthing (the NAS
+member held in windows) and NAS ↔ Drive over rclone bisync, which runs on the
+NAS. Sync now chains them, in that order:
+
+1. a window opens on every held member (`?host=` narrows it to one);
+2. when the last of those windows closes, the API runs the bisync to every
+   rclone member of the folder — the same flags and filter as the crontab leg;
+3. a folder with no held member goes straight to step 2.
+
+A window closed **by hand** (Close window / `POST /windows/<id>/stop`) cancels
+the queued cloud leg — stopping is the operator saying "not now". A window
+that hits its cap (`timeout`) does not: a partial catch-up is still pushed to
+Drive, exactly as the nightly cron would. A cloud leg that cannot start (no
+`SC_RCLONE_URL`, missing compiled filter, rcd error) lands in the ledger as an
+error row and in the log, so a missing bisync is visible rather than silent.
+
+The wait is in-memory: an API restart mid-window abandons the window and the
+queued leg with it (the boot log line says how many). Pressing Sync now again
+while a window is open adopts that window rather than failing, and does not
+queue a second bisync.
+
+Where to look afterwards: **Logs** shows each step as it happens (window
+opened, cloud leg queued, bisync started, bisync done), **History** shows the
+finished rows with their numbers.
 
 ## Deploy order
 

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectLive, type LiveStatus, type ScEvent } from "@/lib/events";
-import type { RunView, WindowView } from "@/lib/api";
+import type { LogLine, RunView, WindowView } from "@/lib/api";
 
 interface LiveValue {
   status: LiveStatus;
@@ -13,6 +13,8 @@ interface LiveValue {
   activeWindows: WindowView[];
   /** Rises on every folder event, so views can key off "something changed". */
   revision: number;
+  /** Server log lines that arrived while this tab was open, newest first, capped. */
+  logLines: LogLine[];
 }
 
 const LiveCtx = createContext<LiveValue>({
@@ -22,9 +24,11 @@ const LiveCtx = createContext<LiveValue>({
   windows: [],
   activeWindows: [],
   revision: 0,
+  logLines: [],
 });
 
 const KEEP = 40;
+const KEEP_LOG = 300;
 
 /**
  * One event stream for the whole app.
@@ -40,6 +44,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   const [runs, setRuns] = useState<RunView[]>([]);
   const [windows, setWindows] = useState<WindowView[]>([]);
   const [revision, setRevision] = useState(0);
+  const [logLines, setLogLines] = useState<LogLine[]>([]);
   // The connection outlives renders; keep the callbacks off the effect's deps.
   const qcRef = useRef(qc);
   qcRef.current = qc;
@@ -78,6 +83,10 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         }
         return;
       }
+      if (e.type === "log") {
+        setLogLines((prev) => [e.line, ...prev.filter((l) => l.id !== e.line.id)].slice(0, KEEP_LOG));
+        return;
+      }
       if (e.type === "folder") {
         setRevision((n) => n + 1);
         const c = qcRef.current;
@@ -100,8 +109,9 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       windows,
       activeWindows: windows.filter((w) => w.state === "running"),
       revision,
+      logLines,
     }),
-    [status, runs, windows, revision],
+    [status, runs, windows, revision, logLines],
   );
 
   return <LiveCtx.Provider value={value}>{children}</LiveCtx.Provider>;
@@ -115,4 +125,10 @@ export function useLive(): LiveValue {
 export function useFolderRuns(folder: string): RunView[] {
   const { active } = useLive();
   return useMemo(() => active.filter((r) => r.folder === folder), [active, folder]);
+}
+
+/** Open sync windows for one folder. */
+export function useFolderWindows(folder: string): WindowView[] {
+  const { activeWindows } = useLive();
+  return useMemo(() => activeWindows.filter((w) => w.folder === folder), [activeWindows, folder]);
 }

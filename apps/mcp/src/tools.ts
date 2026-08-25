@@ -160,6 +160,31 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "sc_sync_folder",
+    description:
+      "Sync a folder now, every leg: open a sync window on its scheduled/manual Syncthing members, then run the rclone bisync to its cloud members once the windows close (straight away if nothing is held). Confirm:true required. host narrows the window to one member; cloud:false stops after the windows.",
+    mutating: true,
+    inputSchema: {
+      type: "object",
+      required: ["folder", "confirm"],
+      properties: {
+        folder: FOLDER_NAME,
+        confirm: CONFIRM,
+        host: { type: "string", description: "Only this Syncthing member's window." },
+        cloud: { type: "boolean", description: "Run the bisync leg after the windows. Default true." },
+      },
+      additionalProperties: false,
+    },
+    handler: (args, api) => {
+      const qs = new URLSearchParams();
+      if (typeof args.host === "string" && args.host) qs.set("host", args.host);
+      if (args.cloud === false) qs.set("cloud", "false");
+      return api.post(
+        `/folders/${encodeURIComponent(String(args.folder))}/sync${qs.toString() ? `?${qs}` : ""}`,
+      );
+    },
+  },
+  {
     name: "sc_trigger_bisync",
     description:
       "Trigger an rclone bisync for a folder. Confirm:true required. ?async=true returns a jobid; poll sc_rclone_job.",

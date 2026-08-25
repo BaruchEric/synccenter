@@ -17,6 +17,7 @@ import { canonicalEmit, FOLDER_KEY_ORDER } from "@synccenter/state-importer";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 import { listYamlNames } from "./fs.ts";
+import type { Log } from "./log.ts";
 import { buildAdapterPool, buildFolderPlan } from "./plan.ts";
 
 export type FolderServiceCode =
@@ -228,6 +229,8 @@ export interface ApplyFolderOpts {
   force?: boolean;
   actor: string;
   source: "api" | "ui";
+  /** Narrates the apply into the server log when given. */
+  log?: Log;
 }
 
 /**
@@ -253,9 +256,17 @@ export async function applyFolder(cfg: ApiConfig, db: Db, name: string, opts: Ap
   const live = await collectLiveState(p, pool);
   const delta = computeDelta(p, live as never);
   if (delta.liveOnly.length > 0 && !opts.prune) {
+    opts.log?.warn("apply", `apply blocked: ${delta.liveOnly.length} live-only folder(s) on the hosts — pass prune to remove them`, {
+      folder: name,
+      data: { liveOnly: delta.liveOnly, actor: opts.actor },
+    });
     return { kind: "blocked", code: "LIVE_ONLY", details: delta.liveOnly };
   }
   if (delta.divergent.length > 0 && !opts.force) {
+    opts.log?.warn("apply", `apply blocked: ${delta.divergent.length} field(s) differ between the manifest and the live hosts — pass force to overwrite`, {
+      folder: name,
+      data: { divergent: delta.divergent, actor: opts.actor },
+    });
     return { kind: "blocked", code: "DIVERGENT", details: delta.divergent };
   }
   const result = await applyPlan(p, pool, { dryRun: opts.dryRun, prune: opts.prune, force: opts.force });
@@ -278,6 +289,23 @@ export async function applyFolder(cfg: ApiConfig, db: Db, name: string, opts: Ap
         : `failures: ${result.hosts.filter((h) => h.status === "failed").length}/${result.hosts.length}`,
     ],
   );
+
+  const failedHosts = result.hosts.filter((h) => h.status === "failed");
+  opts.log?.write({
+    level: overallOk ? "info" : "error",
+    source: "apply",
+    folder: p.folder,
+    message: overallOk
+      ? `${opts.dryRun ? "dry-run apply" : "applied"} to ${result.hosts.length} host(s) by ${opts.actor}${p.warnings.length > 0 ? ` with ${p.warnings.length} warning(s)` : ""}`
+      : `apply failed on ${failedHosts.map((h) => `${h.host} (${h.error?.message ?? "unknown error"})`).join(", ")}`,
+    data: {
+      actor: opts.actor,
+      dryRun: opts.dryRun === true,
+      payloadHash,
+      hosts: result.hosts.map((h) => ({ host: h.host, status: h.status })),
+      warnings: p.warnings,
+    },
+  });
 
   return { kind: "done", result, delta };
 }

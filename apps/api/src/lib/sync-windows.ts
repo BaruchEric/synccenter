@@ -5,6 +5,7 @@ import type { Db } from "../db.ts";
 import type { HostRegistry } from "../registry.ts";
 import type { EventBus } from "./bus.ts";
 import { listYamlNames } from "./fs.ts";
+import { errorText, type Log } from "./log.ts";
 import { firesBetween } from "./cron-times.ts";
 import {
   activeWindowFor,
@@ -57,6 +58,8 @@ export interface SyncWindowEngineOpts {
   db: Db;
   bus: EventBus;
   registry: HostRegistry;
+  /** Where the engine narrates what it does. Optional so tests can stay quiet. */
+  log?: Log;
   /** Poll period while at least one window is open. Default 2000ms. */
   intervalMs?: number;
   /** How often the cron schedules are swept. Default 15s. */
@@ -85,6 +88,7 @@ export class SyncWindowEngine {
   private readonly db: Db;
   private readonly bus: EventBus;
   private readonly registry: HostRegistry;
+  private readonly log: Log | null;
   private readonly intervalMs: number;
   private readonly scheduleMs: number;
   private readonly reconcileMs: number;
@@ -104,6 +108,7 @@ export class SyncWindowEngine {
     this.db = opts.db;
     this.bus = opts.bus;
     this.registry = opts.registry;
+    this.log = opts.log ?? null;
     this.intervalMs = opts.intervalMs ?? 2000;
     this.scheduleMs = opts.scheduleMs ?? 15_000;
     this.reconcileMs = opts.reconcileMs ?? 5 * 60_000;
@@ -199,6 +204,11 @@ export class SyncWindowEngine {
     });
     this.announce(row);
     this.bus.emit({ type: "folder", folder: folderName, action: "resumed" });
+    this.log?.info(
+      "window",
+      `sync window #${row.id} opened on ${host} (${via === "schedule" ? "on schedule" : `by ${actor}`}, cap ${sync.maxWindowMinutes}m)`,
+      { folder: folderName, host, data: { windowId: row.id, via, actor, maxMinutes: sync.maxWindowMinutes } },
+    );
 
     try {
       const client = this.registry.client(host);
@@ -209,7 +219,7 @@ export class SyncWindowEngine {
       // scan keeps running server-side regardless.
       client.scan(folderName).catch(() => {});
     } catch (err) {
-      this.close(row.id, "failed", `could not resume: ${message(err)}`);
+      this.close(row.id, "failed", `could not resume: ${errorText(err)}`);
       return getWindow(this.db, row.id)!;
     }
     return row;
@@ -249,8 +259,14 @@ export class SyncWindowEngine {
         if (activeWindowFor(this.db, job.folder, job.host)) continue;
         try {
           await this.open(job.folder, job.host, "schedule", "scheduler", "schedule");
-        } catch {
-          /* an unreachable host at fire time is the next window's problem */
+        } catch (err) {
+          // An unreachable host at fire time is the next window's problem, but
+          // a schedule that silently never fires is exactly what the log is for.
+          this.log?.warn("schedule", `could not open the scheduled window on ${job.host}: ${errorText(err)}`, {
+            folder: job.folder,
+            host: job.host,
+            data: { cron: job.cron },
+          });
         }
       }
       this.sweptUpTo = upTo;
@@ -273,6 +289,11 @@ export class SyncWindowEngine {
         if (!live.paused) {
           await client.pauseFolder(job.folder);
           this.bus.emit({ type: "folder", folder: job.folder, action: "paused" });
+          this.log?.info("reconcile", `re-paused ${job.folder} on ${job.host}: held member found running outside a window`, {
+            folder: job.folder,
+            host: job.host,
+            data: { mode: job.mode },
+          });
         }
       } catch {
         /* host offline or folder not applied yet — nothing to hold */
@@ -292,7 +313,7 @@ export class SyncWindowEngine {
       status = await this.registry.client(w.host).getFolderStatus(w.folder);
     } catch (err) {
       if (recordWindowMiss(this.db, w.id) >= MAX_MISSES) {
-        this.close(w.id, "failed", `lost contact with ${w.host}: ${message(err)}`);
+        this.close(w.id, "failed", `lost contact with ${w.host}: ${errorText(err)}`);
       }
       return;
     }
@@ -375,8 +396,12 @@ export class SyncWindowEngine {
     void (async () => {
       try {
         await this.registry.client(row.host).pauseFolder(row.folder);
-      } catch {
-        /* reconciler retries */
+      } catch (err) {
+        this.log?.warn("window", `could not re-pause ${row.folder} on ${row.host} after window #${row.id}: ${errorText(err)} — the reconciler will retry`, {
+          folder: row.folder,
+          host: row.host,
+          data: { windowId: row.id },
+        });
       }
     })();
 
@@ -384,6 +409,30 @@ export class SyncWindowEngine {
       state === "done"
         ? `sync window on ${row.host} · ${size(row.global_bytes)} in sync · ${elapsedLabel(row.started_at, row.finished_at)}`
         : `sync window on ${row.host} · ${error ?? state}`;
+    const lineLevel = state === "done" || state === "stopped" ? "info" : state === "timeout" ? "warn" : "error";
+    this.log?.write({
+      level: lineLevel,
+      source: "window",
+      folder: row.folder,
+      host: row.host,
+      message:
+        state === "done"
+          ? `sync window #${row.id} on ${row.host} done: ${size(row.global_bytes)} in sync after ${elapsedLabel(row.started_at, row.finished_at)}${row.peers_total > 0 ? `, ${row.peers_done}/${row.peers_total} peers caught up` : ""}`
+          : state === "stopped"
+            ? `sync window #${row.id} on ${row.host} closed by hand after ${elapsedLabel(row.started_at, row.finished_at)}`
+            : `sync window #${row.id} on ${row.host} ${state}: ${error ?? state}${row.need_files > 0 ? ` (${row.need_files} files / ${size(row.need_bytes)} still needed, last state ${row.sync_state ?? "?"})` : ""}`,
+      data: {
+        windowId: row.id,
+        state,
+        via: row.via,
+        elapsed: elapsedLabel(row.started_at, row.finished_at),
+        globalBytes: row.global_bytes,
+        needBytes: row.need_bytes,
+        needFiles: row.need_files,
+        errors: row.errors,
+        syncState: row.sync_state,
+      },
+    });
     this.db.run(
       `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
        VALUES (?, ?, ?, 'folder', ?, 'sync-window', ?, ?)`,
@@ -404,10 +453,6 @@ export class SyncWindowEngine {
   private announce(row: WindowRow): void {
     this.bus.emit({ type: "window", window: toWindowView(row) });
   }
-}
-
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function size(n: number): string {

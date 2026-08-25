@@ -1,6 +1,7 @@
 import type { RcloneClient } from "@synccenter/adapters";
 import type { Db } from "../db.ts";
 import type { EventBus } from "./bus.ts";
+import { errorText, type Log } from "./log.ts";
 import {
   finishRun,
   listActiveRuns,
@@ -19,6 +20,8 @@ export interface RunTrackerOpts {
   db: Db;
   bus: EventBus;
   rclone: RcloneClient | null;
+  /** Where the tracker narrates what it sees. Optional so tests can stay quiet. */
+  log?: Log;
   /** Poll period while at least one run is in flight. Default 1000ms. */
   intervalMs?: number;
 }
@@ -40,16 +43,18 @@ export class RunTracker {
   private readonly db: Db;
   private readonly bus: EventBus;
   private readonly rclone: RcloneClient | null;
+  private readonly log: Log | null;
   private readonly intervalMs: number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
   /** Set when a completed run still needs its apply_history row written. */
   onFinished?: (run: RunRow) => void;
 
-  constructor({ db, bus, rclone, intervalMs = 1000 }: RunTrackerOpts) {
+  constructor({ db, bus, rclone, log, intervalMs = 1000 }: RunTrackerOpts) {
     this.db = db;
     this.bus = bus;
     this.rclone = rclone;
+    this.log = log ?? null;
     this.intervalMs = intervalMs;
   }
 
@@ -96,7 +101,7 @@ export class RunTracker {
     } catch (err) {
       const misses = recordMiss(this.db, run.id);
       if (misses >= MAX_MISSES) {
-        this.settle(run.id, "failed", `lost contact with rclone: ${message(err)}`);
+        this.settle(run.id, "failed", `lost contact with rclone: ${errorText(err)}`);
       }
       return;
     }
@@ -137,6 +142,31 @@ export class RunTracker {
     const row = finishRun(this.db, id, state, error);
     if (!row) return;
     this.bus.emit({ type: "run", run: toView(row) });
+    const target = row.member ?? "cloud";
+    const secs = Math.round((new Date(row.finished_at ?? Date.now()).getTime() - new Date(row.started_at).getTime()) / 1000);
+    this.log?.write({
+      level: state === "done" ? "info" : state === "stopped" ? "warn" : "error",
+      source: "bisync",
+      folder: row.folder,
+      host: row.member,
+      message:
+        state === "done"
+          ? `bisync → ${target} done: ${row.transfers} transferred, ${row.checks} checked, ${bytesLabel(row.bytes)} in ${secs}s${row.dry_run ? " (dry run)" : ""}`
+          : state === "stopped"
+            ? `bisync → ${target} stopped after ${secs}s${error ? `: ${error}` : ""}`
+            : `bisync → ${target} failed after ${secs}s: ${error ?? "rclone reported an error"}${row.errors > 0 ? ` (${row.errors} errors)` : ""}`,
+      data: {
+        runId: row.id,
+        jobid: row.jobid,
+        state,
+        bytes: row.bytes,
+        transfers: row.transfers,
+        checks: row.checks,
+        errors: row.errors,
+        dryRun: row.dry_run === 1,
+        resync: row.resync === 1,
+      },
+    });
     this.onFinished?.(row);
   }
 }
@@ -145,6 +175,10 @@ function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+function bytesLabel(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  const v = n / 1024 ** i;
+  return `${v.toFixed(i === 0 || v >= 100 ? 0 : 1)} ${units[i]}`;
 }

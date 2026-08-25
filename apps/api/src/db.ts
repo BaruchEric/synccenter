@@ -87,6 +87,22 @@ const SCHEMA = [
    )`,
   `CREATE INDEX IF NOT EXISTS sync_windows_active ON sync_windows (state) WHERE state = 'running'`,
   `CREATE INDEX IF NOT EXISTS sync_windows_recent ON sync_windows (started_at DESC)`,
+
+  // SyncCenter's own operational log: what the engine, the run tracker and
+  // the mutation routes did and why, one line per step. apply_history is the
+  // ledger (one row per finished operation); this is the narrative between
+  // the rows, the part that used to exist only as container stdout.
+  `CREATE TABLE IF NOT EXISTS log_lines (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     ts TEXT NOT NULL,
+     level TEXT NOT NULL CHECK (level IN ('info','warn','error')),
+     source TEXT NOT NULL,
+     folder TEXT,
+     host TEXT,
+     message TEXT NOT NULL,
+     data TEXT
+   )`,
+  `CREATE INDEX IF NOT EXISTS log_lines_folder ON log_lines (folder, id DESC)`,
 ];
 
 export function openDb(path: string): Db {

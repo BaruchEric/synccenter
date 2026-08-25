@@ -1,6 +1,22 @@
 import { Router } from "express";
 import type { Db } from "../db.ts";
 
+interface HistoryRow {
+  id: number;
+  ts: string;
+  actor: string;
+  source: string;
+  target_kind: string;
+  target_name: string;
+  payload_hash: string;
+  result: string;
+  note: string | null;
+}
+
+function kindOf(payloadHash: string): "apply" | "bisync" | "sync-window" {
+  return payloadHash === "bisync" || payloadHash === "sync-window" ? payloadHash : "apply";
+}
+
 export function systemRouter(db: Db): Router {
   const r = Router();
 
@@ -17,14 +33,46 @@ export function systemRouter(db: Db): Router {
     res.json({ jobs: [] });
   });
 
-  r.get("/apply-history", (_req, res) => {
+  /**
+   * The ledger, newest first. `kind` is derived from how the row was written:
+   * bisync runs and sync windows tag `payload_hash` with their name, applies
+   * store a real hash.
+   */
+  r.get("/apply-history", (req, res) => {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 50) || 50));
+    const before = Number(req.query.before);
+    const where: string[] = [];
+    const params: Array<number | string> = [];
+    if (Number.isInteger(before) && before > 0) {
+      where.push("id < ?");
+      params.push(before);
+    }
+    if (typeof req.query.folder === "string" && req.query.folder) {
+      where.push("target_name = ?");
+      params.push(req.query.folder);
+    }
+    if (typeof req.query.result === "string" && ["ok", "error", "dry-run"].includes(req.query.result)) {
+      where.push("result = ?");
+      params.push(req.query.result);
+    }
+    const kind = typeof req.query.kind === "string" ? req.query.kind : "";
+    if (kind === "bisync" || kind === "sync-window") {
+      where.push("payload_hash = ?");
+      params.push(kind);
+    } else if (kind === "apply") {
+      where.push("payload_hash NOT IN ('bisync', 'sync-window')");
+    }
     const rows = db
-      .query(
-        `SELECT id, ts, actor, source, target_kind, target_name, result, note
-         FROM apply_history ORDER BY id DESC LIMIT 50`,
+      .query<HistoryRow, Array<number | string>>(
+        `SELECT id, ts, actor, source, target_kind, target_name, payload_hash, result, note
+         FROM apply_history${where.length ? ` WHERE ${where.join(" AND ")}` : ""}
+         ORDER BY id DESC LIMIT ?`,
       )
-      .all();
-    res.json({ history: rows });
+      .all(...params, limit);
+    res.json({
+      history: rows.map(({ payload_hash, ...row }) => ({ ...row, kind: kindOf(payload_hash) })),
+      nextBefore: rows.length === limit ? rows[rows.length - 1]!.id : null,
+    });
   });
 
   r.post("/apply", (_req, res) => {

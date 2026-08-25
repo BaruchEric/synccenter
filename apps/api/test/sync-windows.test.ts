@@ -10,75 +10,9 @@ import { HostRegistry } from "../src/registry.ts";
 import { SyncWindowEngine } from "../src/lib/sync-windows.ts";
 import { activeWindowFor, getWindow, listWindows } from "../src/lib/windows-service.ts";
 import { firesBetween } from "../src/lib/cron-times.ts";
+import { FakeDaemon } from "./helpers/fake-daemon.ts";
 
 const TOKEN = "test-token-of-sufficient-length-1234567890";
-
-/** A Syncthing daemon whose folder state the test scripts directly. */
-class FakeDaemon {
-  calls: string[] = [];
-  paused = true;
-  state = "idle";
-  needBytes = 0;
-  needFiles = 0;
-  inSyncBytes = 1000;
-  globalBytes = 1000;
-  peerCompletion = 100;
-  peerConnected = true;
-  failStatus: Error | null = null;
-
-  async getStatus() {
-    this.calls.push("getStatus");
-    return { myID: "SELF-DEVICE", uptime: 1, startTime: "", alloc: 0, goroutines: 0 };
-  }
-  async getFolder(id: string) {
-    this.calls.push(`getFolder:${id}`);
-    return {
-      id,
-      label: id,
-      path: "/share/Sync/" + id,
-      type: "sendreceive" as const,
-      devices: [{ deviceID: "SELF-DEVICE" }, { deviceID: "PEER-DEVICE" }],
-      paused: this.paused,
-    };
-  }
-  async getFolderStatus(id: string) {
-    this.calls.push(`getFolderStatus:${id}`);
-    if (this.failStatus) throw this.failStatus;
-    return {
-      state: this.state,
-      globalBytes: this.globalBytes,
-      globalFiles: 10,
-      localBytes: this.inSyncBytes,
-      localFiles: 10,
-      inSyncBytes: this.inSyncBytes,
-      needBytes: this.needBytes,
-      needFiles: this.needFiles,
-      errors: 0,
-      pullErrors: 0,
-      sequence: 1,
-      stateChanged: "2026-08-15T00:00:00Z",
-    };
-  }
-  async getConnections() {
-    this.calls.push("getConnections");
-    return { connections: { "PEER-DEVICE": { connected: this.peerConnected, paused: false } } };
-  }
-  async getCompletion(folder: string, device: string) {
-    this.calls.push(`getCompletion:${folder}:${device}`);
-    return { completion: this.peerCompletion, globalBytes: 0, needBytes: 0, needItems: 0, needDeletes: 0 };
-  }
-  async pauseFolder(id: string) {
-    this.calls.push(`pauseFolder:${id}`);
-    this.paused = true;
-  }
-  async resumeFolder(id: string) {
-    this.calls.push(`resumeFolder:${id}`);
-    this.paused = false;
-  }
-  async scan(id: string) {
-    this.calls.push(`scan:${id}`);
-  }
-}
 
 let tmpRoot: string;
 let cfg: ApiConfig;
@@ -321,10 +255,12 @@ describe("firesBetween", () => {
   });
 });
 
-describe("GET /schedule degradation", () => {
-  it("serves windows even when bisync job planning fails (no sops / no secrets)", async () => {
-    // A folder with an rclone member forces the jobs loop through the secrets
-    // resolver, which cannot succeed in this fixture — no sops, no enc files.
+describe("GET /schedule without secrets", () => {
+  it("plans the bisync legs and the windows with no sops in sight", async () => {
+    // A folder with an rclone member used to force the jobs loop through the
+    // secrets resolver, which cannot succeed in this fixture — no sops, no enc
+    // files — and the deployed container was in exactly that position. The
+    // schedule needs nothing secret: it must come out of the manifests alone.
     writeFileSync(
       join(cfg.hostsDir, "gdrive.yaml"),
       ["name: gdrive", "engine: rclone", "remote: gdrive"].join("\n"),
@@ -361,8 +297,16 @@ describe("GET /schedule degradation", () => {
         expect(body.windows).toEqual([
           { folder: "held", host: "qnap-ts453d", cron: "0 * * * *", maxWindowMinutes: 45 },
         ]);
-        expect(body.jobs).toEqual([]);
-        expect(typeof body.jobsError).toBe("string");
+        expect(body.jobs).toEqual([
+          expect.objectContaining({
+            folder: "cloudy",
+            anchor: "qnap-ts453d",
+            member: "gdrive",
+            cron: "0 4 * * *",
+            command: expect.stringContaining("bisync /share/Sync/cloudy gdrive:sync/cloudy"),
+          }),
+        ]);
+        expect(body.jobsError).toBeUndefined();
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }

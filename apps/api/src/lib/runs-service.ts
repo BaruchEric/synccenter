@@ -95,8 +95,28 @@ export function getRun(db: Db, id: number): RunRow | null {
   return (db.query("SELECT * FROM runs WHERE id = ?").get(id) as RunRow | null) ?? null;
 }
 
-export function listRuns(db: Db, limit = 50): RunRow[] {
-  return db.query("SELECT * FROM runs ORDER BY id DESC LIMIT ?").all(limit) as RunRow[];
+export interface ListOpts {
+  limit?: number;
+  /** Only rows with an id below this one — the cursor for "load older". */
+  before?: number;
+  folder?: string;
+}
+
+export function listRuns(db: Db, limitOrOpts: number | ListOpts = 50): RunRow[] {
+  const opts = typeof limitOrOpts === "number" ? { limit: limitOrOpts } : limitOrOpts;
+  const where: string[] = [];
+  const params: Array<number | string> = [];
+  if (opts.before !== undefined) {
+    where.push("id < ?");
+    params.push(opts.before);
+  }
+  if (opts.folder) {
+    where.push("folder = ?");
+    params.push(opts.folder);
+  }
+  return db
+    .query(`SELECT * FROM runs${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY id DESC LIMIT ?`)
+    .all(...params, opts.limit ?? 50) as RunRow[];
 }
 
 export function listActiveRuns(db: Db): RunRow[] {

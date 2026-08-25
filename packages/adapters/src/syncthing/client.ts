@@ -7,7 +7,9 @@ import type {
   SyncthingDeviceConfig,
   SyncthingEvent,
   SyncthingFolderConfig,
+  SyncthingFolderErrors,
   SyncthingFolderStatus,
+  SyncthingLog,
   SyncthingIgnores,
   SyncthingStatus,
   SyncthingVersion,
@@ -162,6 +164,25 @@ export class SyncthingClient {
   /** PATCH /rest/config/folders/{id} with { paused: false } */
   async resumeFolder(id: string): Promise<void> {
     await this.send("PATCH", `/rest/config/folders/${encodeURIComponent(id)}`, { paused: false });
+  }
+
+  /**
+   * GET /rest/system/log[?since=RFC3339] — the daemon's recent log lines
+   * (its in-memory ring, a few hundred entries), oldest first.
+   */
+  getSystemLog(since?: string): Promise<SyncthingLog> {
+    const q = since ? `?since=${encodeURIComponent(since)}` : "";
+    return this.json("GET", `/rest/system/log${q}`);
+  }
+
+  /**
+   * GET /rest/folder/errors?folder=ID — the items a folder cannot pull and
+   * the reason for each; this is what a non-zero `errors` count in db/status
+   * is counting.
+   */
+  getFolderErrors(folder: string, page = 1, perpage = 100): Promise<SyncthingFolderErrors> {
+    const q = new URLSearchParams({ folder, page: String(page), perpage: String(perpage) });
+    return this.json("GET", `/rest/folder/errors?${q.toString()}`);
   }
 
   /**

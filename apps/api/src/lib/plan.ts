@@ -1,23 +1,81 @@
 import { join } from "node:path";
 import {
+  buildSchedulePlan,
   loadFolderManifest,
   loadAllHosts,
   createSecretsResolver,
   plan as buildPlan,
   isRcloneHost,
   isSyncthingHost,
+  resolveBisyncAnchor,
   type ApplyPlan,
   type AdapterPool,
   type FolderManifest,
   type HostManifest,
+  type SchedulePlan,
 } from "@synccenter/apply-planner";
 import { compile } from "@synccenter/rule-compiler";
 import { SyncthingClient } from "@synccenter/adapters/syncthing";
 import { RcloneClient as RcloneAdapterClient } from "@synccenter/adapters/rclone";
 import type { HostInfo } from "@synccenter/state-importer";
 import type { ApiConfig } from "../config.ts";
+import { listYamlNames } from "./fs.ts";
 
 type SecretsResolver = ReturnType<typeof createSecretsResolver>;
+
+export interface ScheduleJobs {
+  jobs: SchedulePlan[];
+  /** One message per folder whose legs could not be planned; [] when all did. */
+  errors: string[];
+}
+
+/**
+ * Every scheduled bisync leg across the config repo, planned WITHOUT the
+ * secrets resolver.
+ *
+ * The full plan needs device IDs, which means sops, which the deployed API
+ * container does not have — so for months `GET /schedule` answered with no
+ * jobs at all and the dashboard read every folder as "local mesh only". The
+ * schedule itself never needed a secret: anchor, remote, cron and flags are
+ * all in the manifests. A folder that cannot be planned is reported by name
+ * and does not blank the others.
+ */
+export function planScheduleJobs(cfg: ApiConfig): ScheduleJobs {
+  const jobs: SchedulePlan[] = [];
+  const errors: string[] = [];
+  let hosts: Record<string, HostManifest>;
+  try {
+    hosts = loadAllHosts(cfg.hostsDir);
+  } catch (err) {
+    return { jobs, errors: [(err as Error).message] };
+  }
+  for (const name of listYamlNames(cfg.foldersDir)) {
+    if (name.startsWith("example-")) continue;
+    let folder: FolderManifest;
+    try {
+      folder = loadFolderManifest(join(cfg.foldersDir, `${name}.yaml`));
+    } catch (err) {
+      errors.push(`${name}: ${(err as Error).message}`);
+      continue;
+    }
+    // A disabled folder keeps its manifest but contributes no cron lines.
+    if (folder.enabled === false) continue;
+    const members = Object.keys(folder.paths)
+      .map((h) => hosts[h])
+      .filter((h): h is HostManifest => h !== undefined)
+      .filter(isRcloneHost);
+    if (members.length === 0) continue;
+    try {
+      const anchor = resolveBisyncAnchor(folder, hosts);
+      for (const member of members) {
+        jobs.push(...buildSchedulePlan(folder, member, anchor, rcloneFilterPath(cfg, folder)));
+      }
+    } catch (err) {
+      errors.push(`${name}: ${(err as Error).message}`);
+    }
+  }
+  return { jobs, errors };
+}
 
 export function buildFolderPlanFor(
   cfg: ApiConfig,

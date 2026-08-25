@@ -14,6 +14,7 @@ import { RunBand } from "@/components/RunBand";
 import { SyncBand, type HostStatus } from "@/components/SyncBand";
 import { WindowBand } from "@/components/WindowBand";
 import { useLive } from "@/lib/live";
+import { cloudMembers, useRcloneHosts } from "@/lib/hosts";
 import { LiveLamp } from "@/components/LiveLamp";
 
 /**
@@ -50,6 +51,7 @@ export function Activity() {
   });
   const folders = useQuery({ queryKey: ["folders"], queryFn: () => api.get<FoldersList>("/folders") });
   const names = useMemo(() => folders.data?.folders ?? [], [folders.data]);
+  const { rclone } = useRcloneHosts();
 
   // Hoisted out of the Right-now rows so the timeline can read the same poll:
   // a folder Syncthing is working on has to appear at `now`, not only in the
@@ -133,12 +135,8 @@ export function Activity() {
           </div>
         </header>
 
-        {/* Only folders the planner emits a bisync leg for can be "Run". */}
-        <LegStrip
-          names={names}
-          states={states}
-          cloudFolders={new Set((schedule.data?.jobs ?? []).map((j) => j.folder))}
-        />
+        {/* A folder with an rclone member gets the cloud verbs, schedule or no schedule. */}
+        <LegStrip names={names} states={states} rclone={rclone} />
 
         <section aria-label="Timeline" className="mt-6">
           {loading && <p className="py-8 text-center text-sm text-dim">Reading the ledger…</p>}
@@ -319,11 +317,11 @@ type StateQuery = UseQueryResult<FolderState, Error>;
 function LegStrip({
   names,
   states,
-  cloudFolders,
+  rclone,
 }: {
   names: string[];
   states: StateQuery[];
-  cloudFolders: Set<string>;
+  rclone: Set<string>;
 }) {
   if (names.length === 0) return null;
   return (
@@ -333,14 +331,14 @@ function LegStrip({
       </h2>
       <ul className="divide-y divide-rule">
         {names.map((n, i) => (
-          <Leg key={n} name={n} q={states[i]} hasCloud={cloudFolders.has(n)} />
+          <Leg key={n} name={n} q={states[i]} rclone={rclone} />
         ))}
       </ul>
     </section>
   );
 }
 
-function Leg({ name, q, hasCloud }: { name: string; q?: StateQuery; hasCloud: boolean }) {
+function Leg({ name, q, rclone }: { name: string; q?: StateQuery; rclone: Set<string> }) {
   const manifest = useQuery({
     queryKey: ["folder", name],
     queryFn: () => api.get<FolderManifest & { paths?: Record<string, string> }>(
@@ -350,6 +348,7 @@ function Leg({ name, q, hasCloud }: { name: string; q?: StateQuery; hasCloud: bo
   });
   const paused = q?.data?.perHost.some((h) => h.ok && h.status?.state === "paused");
   const disabled = manifest.data?.enabled === false;
+  const hasCloud = cloudMembers(manifest.data, rclone).length > 0;
 
   return (
     <li className={`px-4 py-2.5 ${disabled ? "opacity-55" : ""}`}>
@@ -385,7 +384,7 @@ function Leg({ name, q, hasCloud }: { name: string; q?: StateQuery; hasCloud: bo
         );
       })}
       </div>
-      <div className="mt-2">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <FolderActions
           name={name}
           manifest={manifest.data}

@@ -91,6 +91,26 @@ class FakeSyncthing {
     this.calls.push({ method: "resumeFolder", args: [id] });
     if (this.shouldFail()) throw this.popFail();
   }
+  async getFolder(id: string) {
+    this.calls.push({ method: "getFolder", args: [id] });
+    if (this.shouldFail()) throw this.popFail();
+    return { id, label: id, path: `/share/Sync/${id}`, type: "sendreceive" as const, devices: [], paused: false };
+  }
+  async getSystemLog(since?: string) {
+    this.calls.push({ method: "getSystemLog", args: [since] });
+    if (this.shouldFail()) throw this.popFail();
+    return {
+      messages: [
+        { when: "2026-08-25T10:00:00Z", message: "Ready to synchronize \"shared\"", level: 0 },
+        { when: "2026-08-25T10:00:05Z", message: "Puller (folder \"shared\", item \"a.txt\"): permission denied", level: 2 },
+      ],
+    };
+  }
+  async getFolderErrors(folder: string) {
+    this.calls.push({ method: "getFolderErrors", args: [folder] });
+    if (this.shouldFail()) throw this.popFail();
+    return { folder, errors: [{ path: "a.txt", error: "permission denied" }], page: 1, perpage: 100 };
+  }
 
   private shouldFail(): boolean {
     return this.failNext !== null;
@@ -168,6 +188,8 @@ let qnapFake: FakeSyncthing;
 let rcloneFake: FakeRclone;
 let tracker: BuiltApp["tracker"];
 let bus: BuiltApp["bus"];
+let engine: BuiltApp["engine"];
+let serverLog: BuiltApp["log"];
 
 beforeAll(async () => {
   tmpRoot = mkdtempSync(join(tmpdir(), "synccenter-api-"));
@@ -203,6 +225,22 @@ beforeAll(async () => {
       "type: send-receive",
       "paths:",
       "  mac-studio: /Users/eric/Sync/local",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(configDir, "folders", "held-cloud.yaml"),
+    [
+      "name: held-cloud",
+      "ruleset: base-binaries",
+      "type: send-receive",
+      "paths:",
+      "  mac-studio: /Users/eric/Sync/held-cloud",
+      "  qnap-ts453d: /share/Sync/held-cloud",
+      "  gdrive: sync/held-cloud",
+      "overrides:",
+      "  qnap-ts453d:",
+      "    sync:",
+      "      mode: manual",
     ].join("\n"),
   );
   writeFileSync(
@@ -277,6 +315,8 @@ beforeAll(async () => {
   // suite never depends on (or is held open by) a live interval.
   tracker = built.tracker;
   bus = built.bus;
+  engine = built.engine;
+  serverLog = built.log;
 
   server = await new Promise<Server>((resolve) => {
     const s = app.listen(0, () => resolve(s));
@@ -366,7 +406,7 @@ describe("public + auth", () => {
 describe("config-repo reads", () => {
   it("GET /folders", async () => {
     const r = await call("/folders");
-    expect(await r.json()).toEqual({ folders: ["no-cloud", "shared"] });
+    expect(await r.json()).toEqual({ folders: ["held-cloud", "no-cloud", "shared"] });
   });
 
   it("GET /folders/:name", async () => {
@@ -1087,5 +1127,253 @@ describe("bisync flags reach rclone", () => {
     const body = (await r.json()) as { filtersFile: string };
     // No SC_RCLONE_FILTERS_DIR in this suite, so it stays the local path.
     expect(body.filtersFile).toBe(join(configDir, "compiled", "base-binaries", "filter.rclone"));
+  });
+});
+
+describe("POST /folders/:name/sync — every leg", () => {
+  const armFilter = () => {
+    mkdirSync(join(configDir, "compiled", "base-binaries"), { recursive: true });
+    writeFileSync(join(configDir, "compiled", "base-binaries", "filter.rclone"), "+ **\n");
+  };
+  beforeEach(async () => {
+    armFilter();
+    rcloneFake.nextJobStatus = { finished: true, success: true };
+    await tracker.tick();
+    // Close whatever window an earlier test left open, or the next Sync now
+    // adopts it and this suite's counts drift.
+    for (const w of (await (await call("/windows")).json() as { windows: Array<{ id: number; state: string }> }).windows) {
+      if (w.state === "running") await engine.stopWindow(w.id);
+    }
+    rcloneFake.calls.length = 0;
+    qnapFake.calls.length = 0;
+  });
+
+  it("opens the window on the held member and queues the bisync behind it", async () => {
+    rcloneFake.nextJobStatus = { finished: false };
+    const r = await call("/folders/held-cloud/sync", { method: "POST" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      windows: Array<{ id: number; host: string; state: string }>;
+      failed: unknown[];
+      cloud: { status: string; members: string[]; after: number[] };
+    };
+    expect(body.windows).toHaveLength(1);
+    expect(body.windows[0]!.host).toBe("qnap-ts453d");
+    expect(body.windows[0]!.state).toBe("running");
+    expect(body.cloud).toEqual({ status: "queued", members: ["gdrive"], after: [body.windows[0]!.id] });
+    expect(qnapFake.calls.some((c) => c.method === "resumeFolder" && c.args[0] === "held-cloud")).toBe(true);
+    // The NAS is still catching up from the Mac: nothing has gone to Drive.
+    expect(rcloneFake.calls.filter((c) => c.method === "bisync")).toHaveLength(0);
+
+    // Closing the window by hand cancels the queued leg — and says so.
+    const stop = await call(`/windows/${body.windows[0]!.id}/stop`, { method: "POST" });
+    expect(stop.status).toBe(200);
+    await engine.tick();
+    expect(rcloneFake.calls.filter((c) => c.method === "bisync")).toHaveLength(0);
+    const lines = (await (await call("/log?folder=held-cloud&level=warn")).json()) as {
+      lines: Array<{ message: string; source: string }>;
+    };
+    expect(lines.lines.some((l) => l.source === "sync" && l.message.includes("closed by hand"))).toBe(true);
+  });
+
+  it("runs the bisync straight away when the folder has no held member", async () => {
+    rcloneFake.nextJobStatus = { finished: false };
+    const r = await call("/folders/shared/sync", { method: "POST" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      windows: unknown[];
+      cloud: { status: string; runs: Array<{ id: number; member: string; state: string }>; errors: unknown[] };
+    };
+    expect(body.windows).toEqual([]);
+    expect(body.cloud.status).toBe("started");
+    expect(body.cloud.runs).toHaveLength(1);
+    expect(body.cloud.runs[0]!.member).toBe("gdrive");
+    expect(body.cloud.errors).toEqual([]);
+    const bisync = rcloneFake.calls.find((c) => c.method === "bisync")!;
+    expect((bisync.args[0] as { path2: string; async: boolean }).path2).toBe("gdrive:sync/shared");
+    expect((bisync.args[0] as { async: boolean }).async).toBe(true);
+  });
+
+  it("?cloud=false keeps the old windows-only behaviour", async () => {
+    const r = await call("/folders/held-cloud/sync?cloud=false", { method: "POST" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { windows: unknown[]; cloud: unknown };
+    expect(body.windows).toHaveLength(1);
+    expect(body.cloud).toBeNull();
+    expect(rcloneFake.calls.filter((c) => c.method === "bisync")).toHaveLength(0);
+  });
+
+  it("400s when there is nothing to sync now", async () => {
+    const r = await call("/folders/no-cloud/sync", { method: "POST" });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { code: string }).code).toBe("NOTHING_TO_SYNC");
+    expect((await call("/folders/shared/sync?cloud=false", { method: "POST" })).status).toBe(400);
+    expect((await call("/folders/nonexistent/sync", { method: "POST" })).status).toBe(404);
+  });
+
+  it("puts a failed cloud start in the ledger instead of losing it", async () => {
+    rmSync(join(configDir, "compiled", "base-binaries", "filter.rclone"), { force: true });
+    const r = await call("/folders/shared/sync", { method: "POST" });
+    // Nothing happened: no window, no run.
+    expect(r.status).toBe(500);
+    const body = (await r.json()) as { cloud: { status: string; errors: Array<{ member: string; error: string }> } };
+    expect(body.cloud.errors[0]!.error).toContain("filter.rclone missing");
+    const hist = (await (await call("/apply-history?folder=shared&kind=bisync&limit=1")).json()) as {
+      history: Array<{ result: string; note: string; kind: string }>;
+    };
+    expect(hist.history[0]!.result).toBe("error");
+    expect(hist.history[0]!.kind).toBe("bisync");
+    expect(hist.history[0]!.note).toContain("did not start");
+  });
+});
+
+describe("GET /log — the server's own story", () => {
+  it("lists newest first, filters, and pages with a cursor", async () => {
+    serverLog.info("system", "alpha line for the log test", { folder: "shared" });
+    serverLog.warn("window", "beta line for the log test", { folder: "shared", host: "qnap-ts453d" });
+    serverLog.error("bisync", "gamma line for the log test", { folder: "no-cloud" });
+
+    const all = (await (await call("/log?q=for%20the%20log%20test")).json()) as {
+      lines: Array<{ id: number; level: string; source: string; folder: string | null; host: string | null; message: string }>;
+      nextBefore: number | null;
+    };
+    expect(all.lines.map((l) => l.message)).toEqual([
+      "gamma line for the log test",
+      "beta line for the log test",
+      "alpha line for the log test",
+    ]);
+    expect(all.nextBefore).toBeNull();
+    expect(all.lines[1]).toMatchObject({ level: "warn", source: "window", folder: "shared", host: "qnap-ts453d" });
+
+    const shared = (await (await call("/log?folder=shared&q=log%20test")).json()) as { lines: Array<{ message: string }> };
+    expect(shared.lines.map((l) => l.message)).toEqual(["beta line for the log test", "alpha line for the log test"]);
+
+    const errors = (await (await call("/log?level=error&q=log%20test")).json()) as { lines: Array<{ message: string }> };
+    expect(errors.lines.map((l) => l.message)).toEqual(["gamma line for the log test"]);
+
+    const page = (await (await call("/log?limit=2&q=log%20test")).json()) as {
+      lines: Array<{ id: number }>;
+      nextBefore: number | null;
+    };
+    expect(page.lines).toHaveLength(2);
+    expect(page.nextBefore).toBe(page.lines[1]!.id);
+    const older = (await (await call(`/log?limit=2&q=log%20test&before=${page.nextBefore}`)).json()) as {
+      lines: Array<{ message: string }>;
+    };
+    expect(older.lines.map((l) => l.message)).toEqual(["alpha line for the log test"]);
+  });
+
+  it("is written by the things that happen, and pushed over the event stream", async () => {
+    const ctrl = new AbortController();
+    const res = await call("/events", { signal: ctrl.signal });
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    const frames: string[] = [];
+    const pump = (async () => {
+      let buf = "";
+      while (!frames.some((f) => f.includes("event: log"))) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buf += dec.decode(value, { stream: true });
+        let i: number;
+        while ((i = buf.indexOf("\n\n")) !== -1) {
+          frames.push(buf.slice(0, i));
+          buf = buf.slice(i + 2);
+        }
+      }
+    })();
+    await Bun.sleep(30);
+    // A pause is a mutation; mutations narrate themselves.
+    expect((await call("/folders/shared/pause", { method: "POST" })).status).toBe(200);
+    await pump;
+    ctrl.abort();
+    const frame = frames.find((f) => f.includes("event: log"))!;
+    expect(frame).toContain('"source":"folder"');
+    expect(frame).toContain("paused on");
+
+    const lines = (await (await call("/log?folder=shared&source=folder&limit=1")).json()) as {
+      lines: Array<{ message: string }>;
+    };
+    expect(lines.lines[0]!.message).toContain("paused on mac-studio, qnap-ts453d");
+  });
+});
+
+describe("GET /apply-history — filters and kinds", () => {
+  it("derives a kind per row and filters by it", async () => {
+    const all = (await (await call("/apply-history?limit=500")).json()) as {
+      history: Array<{ kind: string; result: string; target_name: string }>;
+      nextBefore: number | null;
+    };
+    expect(all.history.length).toBeGreaterThan(0);
+    expect(all.history.every((h) => ["apply", "bisync", "sync-window"].includes(h.kind))).toBe(true);
+    expect(all.nextBefore).toBeNull();
+
+    const bisyncs = (await (await call("/apply-history?kind=bisync")).json()) as { history: Array<{ kind: string }> };
+    expect(bisyncs.history.length).toBeGreaterThan(0);
+    expect(bisyncs.history.every((h) => h.kind === "bisync")).toBe(true);
+
+    const windows = (await (await call("/apply-history?kind=sync-window")).json()) as { history: Array<{ kind: string }> };
+    expect(windows.history.every((h) => h.kind === "sync-window")).toBe(true);
+
+    const errors = (await (await call("/apply-history?result=error&folder=shared")).json()) as {
+      history: Array<{ result: string; target_name: string }>;
+    };
+    expect(errors.history.every((h) => h.result === "error" && h.target_name === "shared")).toBe(true);
+
+    const page = (await (await call("/apply-history?limit=1")).json()) as {
+      history: Array<{ id: number }>;
+      nextBefore: number | null;
+    };
+    expect(page.nextBefore).toBe(page.history[0]!.id);
+  });
+
+  it("GET /runs and /windows take the same folder filter and cursor", async () => {
+    const runs = (await (await call("/runs?folder=shared&limit=1")).json()) as {
+      runs: Array<{ id: number; folder: string }>;
+      nextBefore: number | null;
+    };
+    expect(runs.runs.every((r) => r.folder === "shared")).toBe(true);
+    if (runs.runs.length === 1) expect(runs.nextBefore).toBe(runs.runs[0]!.id);
+    const none = (await (await call("/runs?folder=does-not-exist")).json()) as { runs: unknown[]; nextBefore: number | null };
+    expect(none.runs).toEqual([]);
+    expect(none.nextBefore).toBeNull();
+
+    const windows = (await (await call("/windows?folder=held-cloud&limit=1")).json()) as {
+      windows: Array<{ folder: string }>;
+      nextBefore: number | null;
+    };
+    expect(windows.windows.every((w) => w.folder === "held-cloud")).toBe(true);
+  });
+});
+
+describe("Syncthing's own log and folder errors", () => {
+  it("GET /hosts/:name/log proxies the daemon's log ring", async () => {
+    const r = await call("/hosts/mac-studio/log");
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { host: string; messages: Array<{ when: string; message: string; level?: number }> };
+    expect(body.host).toBe("mac-studio");
+    expect(body.messages).toHaveLength(2);
+    expect(body.messages[1]!.message).toContain("permission denied");
+    expect(macFake.calls.some((c) => c.method === "getSystemLog")).toBe(true);
+  });
+
+  it("GET /hosts/:name/log refuses an rclone member and 502s on a dead daemon", async () => {
+    expect((await call("/hosts/gdrive/log")).status).toBe(400);
+    macFake.failNext = new SyncthingError("connection refused", null, "/rest/system/log");
+    expect((await call("/hosts/mac-studio/log")).status).toBe(502);
+  });
+
+  it("GET /folders/:name/errors names what each member cannot pull", async () => {
+    qnapFake.failNext = new SyncthingError("offline", null, "/rest/folder/errors");
+    const r = await call("/folders/shared/errors");
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      folder: string;
+      perHost: Array<{ host: string; ok: boolean; errors: Array<{ path: string; error: string }>; error?: string }>;
+    };
+    expect(body.perHost.map((h) => h.host)).toEqual(["mac-studio", "qnap-ts453d"]);
+    expect(body.perHost[0]).toMatchObject({ ok: true, errors: [{ path: "a.txt", error: "permission denied" }] });
+    expect(body.perHost[1]).toMatchObject({ ok: false, errors: [] });
+    expect(body.perHost[1]!.error).toContain("offline");
   });
 });

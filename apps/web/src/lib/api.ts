@@ -58,17 +58,23 @@ export interface Health { ok: boolean; version: string }
 export interface FoldersList { folders: string[] }
 export interface RulesList { rules: string[] }
 export interface HostsList { hosts: string[] }
+/** How a ledger row came to be: an apply, a bisync run, or a sync window. */
+export type HistoryKind = "apply" | "bisync" | "sync-window";
+export interface HistoryRow {
+  id: number;
+  ts: string;
+  actor: string;
+  source: "api" | "cli" | "ui" | "mcp";
+  target_kind: string;
+  target_name: string;
+  result: "ok" | "error" | "dry-run";
+  note: string | null;
+  kind: HistoryKind;
+}
 export interface ApplyHistory {
-  history: Array<{
-    id: number;
-    ts: string;
-    actor: string;
-    source: "api" | "cli" | "ui" | "mcp";
-    target_kind: string;
-    target_name: string;
-    result: "ok" | "error" | "dry-run";
-    note: string | null;
-  }>;
+  history: HistoryRow[];
+  /** Cursor for `?before=`; null once the page came back short. */
+  nextBefore: number | null;
 }
 export interface ScheduleList {
   jobs: Array<{
@@ -120,6 +126,7 @@ export interface RunView {
 export interface RunsList {
   runs: RunView[];
   activeCount: number;
+  nextBefore?: number | null;
 }
 /** How a Syncthing member participates in a folder. */
 export type SyncMode = "realtime" | "scheduled" | "manual";
@@ -152,6 +159,44 @@ export interface WindowView {
 export interface WindowsList {
   windows: WindowView[];
   activeCount: number;
+  nextBefore?: number | null;
+}
+/** What POST /folders/:name/sync did — every leg, in order. */
+export type CloudLeg =
+  | { status: "queued"; members: string[]; after: number[] }
+  | { status: "started"; members: string[]; runs: RunView[]; errors: Array<{ member: string; error: string }> };
+export interface SyncNowResult {
+  folder: string;
+  windows: WindowView[];
+  failed: Array<{ host: string; error: string }>;
+  cloud: CloudLeg | null;
+}
+/** One line of SyncCenter's own log (GET /log, and `log` events). */
+export type LogLevel = "info" | "warn" | "error";
+export type LogSource = "window" | "schedule" | "reconcile" | "bisync" | "sync" | "apply" | "folder" | "system";
+export interface LogLine {
+  id: number;
+  ts: string;
+  level: LogLevel;
+  source: LogSource;
+  folder: string | null;
+  host: string | null;
+  message: string;
+  data: Record<string, unknown> | null;
+}
+export interface LogList {
+  lines: LogLine[];
+  nextBefore: number | null;
+}
+/** A Syncthing daemon's own log ring (GET /hosts/:name/log). */
+export interface HostLog {
+  host: string;
+  messages: Array<{ when: string; message: string; level?: number }>;
+}
+/** What each member cannot pull for a folder (GET /folders/:name/errors). */
+export interface FolderErrors {
+  folder: string;
+  perHost: Array<{ host: string; ok: boolean; errors: Array<{ path: string; error: string }>; error?: string }>;
 }
 /** A folder manifest as stored in synccenter-config/folders/<name>.yaml. */
 export interface FolderManifest {

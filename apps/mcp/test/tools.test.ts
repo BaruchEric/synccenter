@@ -33,12 +33,14 @@ describe("tool catalog", () => {
         "sc_rclone_job",
         "sc_recent_changes",
         "sc_resume_folder",
+        "sc_sync_folder",
         "sc_trigger_bisync",
       ].sort(),
     );
     expect(tool("sc_pause_folder").mutating).toBe(true);
     expect(tool("sc_apply").mutating).toBe(true);
     expect(tool("sc_trigger_bisync").mutating).toBe(true);
+    expect(tool("sc_sync_folder").mutating).toBe(true);
     expect(tool("sc_health").mutating).toBe(false);
     expect(tool("sc_compile_rules").mutating).toBe(false);
   });
@@ -93,6 +95,20 @@ describe("handlers (HTTP shape)", () => {
     await tool("sc_compile_rules").handler({ ruleset: "node", allowDivergent: true }, api);
     expect(seen.method).toBe("POST");
     expect(seen.url).toContain("allowDivergent=true");
+  });
+
+  it("sc_sync_folder hits /sync and forwards host + cloud:false", async () => {
+    let seen!: { url: string; method: string };
+    const api = buildApi(({ url, method }) => {
+      seen = { url, method };
+      return new Response("{}", { status: 200 });
+    });
+    await tool("sc_sync_folder").handler({ folder: "arik", confirm: true }, api);
+    expect(seen.method).toBe("POST");
+    expect(seen.url).toMatch(/\/folders\/arik\/sync$/);
+    await tool("sc_sync_folder").handler({ folder: "arik", confirm: true, host: "qnap-ts453d", cloud: false }, api);
+    expect(seen.url).toContain("host=qnap-ts453d");
+    expect(seen.url).toContain("cloud=false");
   });
 
   it("sc_trigger_bisync passes async/dryRun/resync as query params", async () => {

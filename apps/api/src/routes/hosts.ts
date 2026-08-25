@@ -39,6 +39,23 @@ export function hostsRouter(cfg: ApiConfig, registry: HostRegistry): Router {
     }
   });
 
+  /** The daemon's own recent log — what Syncthing itself has to say. */
+  r.get("/hosts/:name/log", async (req, res) => {
+    if (registry.isRclone(req.params.name)) {
+      res.status(400).json({
+        error: `host ${req.params.name} is an rclone member — there is no Syncthing daemon to read a log from`,
+      });
+      return;
+    }
+    try {
+      const since = typeof req.query.since === "string" ? req.query.since : undefined;
+      const log = await registry.client(req.params.name).getSystemLog(since);
+      res.json({ host: req.params.name, messages: log.messages ?? [] });
+    } catch (err) {
+      handleSyncthingErr(res, err, req.params.name);
+    }
+  });
+
   r.get("/hosts/:name/folders", async (req, res) => {
     try {
       const folders = await registry.client(req.params.name).listFolders();

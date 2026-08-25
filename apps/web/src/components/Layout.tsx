@@ -9,6 +9,8 @@ export function Layout() {
     { to: "/", label: "Dashboard" },
     { to: "/activity", label: "Activity" },
     { to: "/folders", label: "Folders" },
+    { to: "/history", label: "History" },
+    { to: "/logs", label: "Logs" },
     { to: "/rules", label: "Rules" },
     { to: "/hosts", label: "Hosts" },
     { to: "/conflicts", label: "Conflicts" },

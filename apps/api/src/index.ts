@@ -3,7 +3,7 @@ import { buildApp } from "./app.ts";
 import { loadConfig } from "./config.ts";
 
 const cfg = loadConfig();
-const { app, tracker, rclone, engine } = buildApp({ cfg });
+const { app, tracker, rclone, engine } = buildApp({ cfg, logStdout: true });
 
 // Only the long-lived server polls rclone; tests build an app without it.
 tracker.start();

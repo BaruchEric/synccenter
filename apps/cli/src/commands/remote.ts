@@ -95,14 +95,19 @@ export function registerRemoteCommands(program: Command): void {
 
   program
     .command("sync <folder>")
-    .description("Open a sync window now: resume the folder's scheduled/manual members, catch up, pause again")
-    .option("--host <host>", "Only this member (default: every scheduled/manual member)")
-    .action(async (folder: string, o: { host?: string }, cmd: Command) => {
+    .description(
+      "Sync now, every leg: open a window on the folder's scheduled/manual members, then bisync to its cloud members once the windows close",
+    )
+    .option("--host <host>", "Only this member's window (default: every scheduled/manual member)")
+    .option("--no-cloud", "Stop after the sync windows; skip the bisync to cloud members")
+    .action(async (folder: string, o: { host?: string; cloud: boolean }, cmd: Command) => {
       const ctx = ctxOf(cmd);
       try {
         const api = apiFromCmd(cmd);
-        const qs = o.host ? `?host=${encodeURIComponent(o.host)}` : "";
-        const r = await api.post(`/folders/${encodeURIComponent(folder)}/sync${qs}`);
+        const qs = new URLSearchParams();
+        if (o.host) qs.set("host", o.host);
+        if (o.cloud === false) qs.set("cloud", "false");
+        const r = await api.post(`/folders/${encodeURIComponent(folder)}/sync${qs.toString() ? `?${qs}` : ""}`);
         emit(ctx, JSON.stringify(r, null, 2), r);
       } catch (err) {
         handle(ctx, err);

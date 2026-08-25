@@ -1,3 +1,4 @@
+import type { LogLine } from "./log.ts";
 import type { RunView } from "./runs-service.ts";
 import type { WindowView } from "./windows-service.ts";
 
@@ -10,6 +11,7 @@ export type ScEvent =
   | { type: "run"; run: RunView }
   | { type: "window"; window: WindowView }
   | { type: "folder"; folder: string; action: FolderAction }
+  | { type: "log"; line: LogLine }
   | { type: "ping" };
 
 export type FolderAction =

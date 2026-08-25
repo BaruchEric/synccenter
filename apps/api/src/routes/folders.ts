@@ -1,14 +1,12 @@
 import { Router, type Response } from "express";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { RcloneClient, RcloneError, SyncthingError } from "@synccenter/adapters";
+import { RcloneClient, SyncthingError } from "@synccenter/adapters";
 import { CompileError } from "@synccenter/rule-compiler";
-import { effectiveSync, loadAllHosts, PlanError, resolveBisyncAnchor } from "@synccenter/apply-planner";
+import { effectiveSync } from "@synccenter/apply-planner";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 import { listYamlNames, parseFolderByName } from "../lib/fs.ts";
-import { buildFolderPlan, rcloneFilterPathForDaemon } from "../lib/plan.ts";
-import { planBisyncFlags, BisyncFlagError } from "../lib/bisync-flags.ts";
+import { buildFolderPlan } from "../lib/plan.ts";
+import { BisyncStartError, startBisync } from "../lib/bisync-service.ts";
 import {
   applyFolder,
   createFolder,
@@ -20,10 +18,9 @@ import {
 import { respondJsonError } from "../lib/errors.ts";
 import { HostRegistry, HostRegistryError } from "../registry.ts";
 import type { EventBus, FolderAction } from "../lib/bus.ts";
-import { startRun, toView } from "../lib/runs-service.ts";
-import { SyncWindowError, type SyncWindowEngine } from "../lib/sync-windows.ts";
-import { toWindowView } from "../lib/windows-service.ts";
-import { syncWindowErrorStatus } from "./windows.ts";
+import type { Log } from "../lib/log.ts";
+import { SyncNow, SyncNowError } from "../lib/sync-now.ts";
+import type { SyncWindowEngine } from "../lib/sync-windows.ts";
 
 export function foldersRouter(
   cfg: ApiConfig,
@@ -32,6 +29,8 @@ export function foldersRouter(
   rclone: RcloneClient | null,
   bus: EventBus,
   engine: SyncWindowEngine,
+  log: Log,
+  syncNow: SyncNow,
 ): Router {
   const r = Router();
 
@@ -47,6 +46,7 @@ export function foldersRouter(
     try {
       const created = createFolder(cfg, req.body);
       announce(created.manifest.name, "created");
+      log.info("folder", `folder created (${created.relPath})`, { folder: created.manifest.name });
       res.status(201).json({ folder: created.manifest, path: created.relPath });
     } catch (err) {
       if (err instanceof FolderServiceError) {
@@ -98,40 +98,54 @@ export function foldersRouter(
   });
 
   /**
-   * Open an on-demand sync window: resume the folder on its held (scheduled/
-   * manual) members, let Syncthing catch up, pause again. `?host=` narrows it
-   * to one member; default is every held member of the folder.
+   * What each Syncthing member cannot pull for this folder, and why. This is
+   * the detail behind a non-zero `errors` count in /state — the thing that
+   * keeps a window from ever closing as done.
    */
-  r.post("/folders/:name/sync", async (req, res) => {
+  r.get("/folders/:name/errors", async (req, res) => {
     const m = parseFolderByName(cfg.foldersDir, req.params.name);
     if (!m) {
       res.status(404).json({ error: `folder not found: ${req.params.name}` });
       return;
     }
-    const held = Object.keys(m.paths).filter(
-      (h) => !registry.isRclone(h) && effectiveSync(m, h).mode !== "realtime",
-    );
-    const requested = typeof req.query.host === "string" ? [req.query.host] : held;
-    if (requested.length === 0) {
-      res.status(400).json({
-        error: `folder ${m.name} has no scheduled/manual members — every Syncthing member is realtime`,
-      });
-      return;
-    }
-    const windows = [];
-    const failed = [];
-    for (const host of requested) {
-      try {
-        windows.push(toWindowView(await engine.open(m.name, host, "manual", "api-bearer", "api")));
-      } catch (err) {
-        if (err instanceof SyncWindowError && requested.length === 1) {
-          res.status(syncWindowErrorStatus(err)).json({ error: err.message, code: err.code });
-          return;
+    const perHost = await Promise.all(
+      syncthingHosts(m).map(async (host) => {
+        try {
+          const out = await registry.client(host).getFolderErrors(m.name);
+          return { host, ok: true as const, errors: out.errors ?? [] };
+        } catch (err) {
+          return { host, ok: false as const, errors: [], error: errorMessage(err) };
         }
-        failed.push({ host, error: errorMessage(err) });
+      }),
+    );
+    res.json({ folder: m.name, perHost });
+  });
+
+  /**
+   * Sync now, every leg: open a window on the held (scheduled/manual)
+   * Syncthing members — `?host=` narrows it to one — and once those windows
+   * close, run the bisync to every rclone member. `?cloud=false` stops after
+   * the windows. A folder with no held member but a cloud member goes
+   * straight to the bisync.
+   */
+  r.post("/folders/:name/sync", async (req, res) => {
+    try {
+      const out = await syncNow.run(req.params.name, {
+        ...(typeof req.query.host === "string" ? { host: req.query.host } : {}),
+        cloud: req.query.cloud !== "false",
+        actor: "api-bearer",
+        source: "api",
+      });
+      const somethingHappened =
+        out.windows.length > 0 || out.cloud?.status === "queued" || (out.cloud?.status === "started" && out.cloud.runs.length > 0);
+      res.status(somethingHappened ? 200 : 500).json(out);
+    } catch (err) {
+      if (err instanceof SyncNowError) {
+        res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+        return;
       }
+      res.status(500).json({ error: errorMessage(err) });
     }
-    res.status(windows.length > 0 ? 200 : 500).json({ folder: m.name, windows, failed });
   });
 
   const broadcast = async (
@@ -154,6 +168,17 @@ export function foldersRouter(
         }
       }),
     );
+    const failed = results.filter((x) => !x.ok);
+    log.write({
+      level: failed.length === 0 ? "info" : "warn",
+      source: "folder",
+      folder: m.name,
+      message:
+        failed.length === 0
+          ? `${op === "pause" ? "paused" : "resumed"} on ${results.map((x) => x.host).join(", ") || "no host"}`
+          : `${op} failed on ${failed.map((x) => `${x.host} (${x.error})`).join(", ")}`,
+      data: { op, perHost: results },
+    });
     return { folder: m.name, perHost: results };
   };
 
@@ -161,6 +186,7 @@ export function foldersRouter(
     try {
       const out = updateFolder(cfg, req.params.name, req.body);
       announce(out.manifest.name, "updated");
+      log.info("folder", `manifest updated (${out.relPath})`, { folder: out.manifest.name });
       res.json({ folder: out.manifest, path: out.relPath });
     } catch (err) {
       respondFolderServiceError(res, err);
@@ -182,6 +208,9 @@ export function foldersRouter(
     try {
       const out = deleteFolder(cfg, req.params.name);
       announce(req.params.name, "deleted");
+      log.warn("folder", `manifest deleted (${out.relPath}); host folders and data left untouched`, {
+        folder: req.params.name,
+      });
       res.json({ deleted: req.params.name, path: out.relPath });
     } catch (err) {
       respondFolderServiceError(res, err);
@@ -193,6 +222,9 @@ export function foldersRouter(
       try {
         const out = setFolderEnabled(cfg, req.params.name, enabled);
         announce(out.manifest.name, enabled ? "enabled" : "disabled");
+        log.info("folder", enabled ? "enabled — schedules apply again" : "disabled — no scheduled runs until re-enabled", {
+          folder: out.manifest.name,
+        });
         res.json({ folder: out.manifest, path: out.relPath });
       } catch (err) {
         respondFolderServiceError(res, err);
@@ -244,6 +276,7 @@ export function foldersRouter(
         force,
         actor: "api-bearer",
         source: "api",
+        log,
       });
       if (outcome.kind === "blocked") {
         res.status(409).json({
@@ -262,163 +295,37 @@ export function foldersRouter(
       res.json({ result: outcome.result, delta: outcome.delta });
     } catch (err) {
       if (err instanceof CompileError) {
+        log.error("apply", `apply refused: ${err.message}`, { folder: req.params.name });
         res.status(400).json({ error: { code: "COMPILE_ERROR", message: err.message } });
         return;
       }
+      log.error("apply", `apply failed: ${errorMessage(err)}`, { folder: req.params.name });
       respondJsonError(res, err);
     }
   });
 
   r.post("/folders/:name/bisync", async (req, res) => {
-    if (!rclone) {
-      res.status(503).json({ error: "rclone is not configured (set SC_RCLONE_URL)" });
-      return;
-    }
-    const m = parseFolderByName(cfg.foldersDir,req.params.name);
-    if (!m) {
-      res.status(404).json({ error: `folder not found: ${req.params.name}` });
-      return;
-    }
-    // rclone members of this folder — engine: rclone hosts appearing in paths.
-    const rcloneMembers = Object.keys(m.paths).filter((h) => registry.isRclone(h));
-    if (rcloneMembers.length === 0) {
-      res.status(400).json({ error: `folder ${m.name} has no rclone member in paths` });
-      return;
-    }
-    const memberName = typeof req.query.member === "string" ? req.query.member : rcloneMembers[0]!;
-    if (!rcloneMembers.includes(memberName)) {
-      res.status(400).json({
-        error: `'${memberName}' is not an rclone member of folder ${m.name} — members: ${rcloneMembers.join(", ")}`,
-      });
-      return;
-    }
-    const member = registry.manifest(memberName)!;
-    if (!member.remote) {
-      res.status(500).json({ error: `host ${memberName} has engine: rclone but no remote` });
-      return;
-    }
-
-    // Find the anchor host — the path on this host is the rcd-local path1.
-    // Same resolution rules (and errors) as the planner's schedule step.
-    let anchorName: string;
     try {
-      anchorName = resolveBisyncAnchor(m, loadAllHosts(cfg.hostsDir)).name;
-    } catch (err) {
-      res.status(err instanceof PlanError ? 400 : 500).json({ error: errorMessage(err) });
-      return;
-    }
-    const path1 = m.paths[anchorName]!; // resolver guarantees the anchor is in paths
-
-    // Keyed by ruleset, not folder, and named the way the DAEMON sees it.
-    const filter = rcloneFilterPathForDaemon(cfg, m);
-    // Only checkable when the daemon shares our filesystem. When it does not,
-    // rclone is the backstop: a filters file it cannot open aborts the run
-    // outright rather than syncing unfiltered (verified against rclone 1.75).
-    if (filter.local && !existsSync(filter.path)) {
-      res.status(409).json({
-        error: `compiled filter.rclone missing at ${filter.path}. Run POST /folders/${m.name}/apply first.`,
-      });
-      return;
-    }
-
-    // The scheduled crontab runs this leg with the manifest's flags; an
-    // on-demand run that quietly omitted them would be a different operation
-    // wearing the same name.
-    let flagPlan;
-    try {
-      flagPlan = planBisyncFlags(m.bisync?.flags);
-    } catch (err) {
-      if (err instanceof BisyncFlagError) {
-        res.status(400).json({ error: { code: "UNSUPPORTED_BISYNC_FLAG", message: err.message } });
-        return;
-      }
-      throw err;
-    }
-
-    const path2 = `${member.remote}:${m.paths[memberName]}`;
-    const async = req.query.async === "true";
-    const dryRun = req.query.dryRun === "true";
-    const resync = req.query.resync === "true";
-
-    // Progress is only readable from a group we name ourselves — rclone's
-    // `job/<jobid>` group stays empty for bisync. Unique per trigger so two
-    // runs of the same folder never share a counter.
-    const statsGroup = `sc/bisync/${m.name}/${crypto.randomUUID().slice(0, 8)}`;
-
-    try {
-      const out = await rclone.bisync({
-        path1,
-        path2,
-        filtersFile: filter.path,
-        statsGroup,
-        ...(async ? { async: true } : {}),
-        ...(dryRun ? { dryRun: true } : {}),
-        ...(resync ? { resync: true } : {}),
-        extra: {
-          ...flagPlan.params,
-          ...(Object.keys(flagPlan.config).length > 0 ? { _config: flagPlan.config } : {}),
-        },
-      });
-
-      const note = `path1=${path1} path2=${path2}${async ? " async" : ""}${dryRun ? " dryRun" : ""}${resync ? " resync" : ""}`;
-
-      if (async && typeof out.jobid === "number") {
-        // Leave apply_history alone: the tracker writes the row when the job
-        // actually ends, with its real result. Recording it here would put a
-        // finished-looking event on the timeline for a job still running.
-        const run = startRun(db, {
-          folder: m.name,
-          member: memberName,
-          jobid: out.jobid,
-          statsGroup,
+      const started = await startBisync(
+        { cfg, db, registry, rclone, bus, log },
+        req.params.name,
+        {
+          ...(typeof req.query.member === "string" ? { member: req.query.member } : {}),
+          async: req.query.async === "true",
+          dryRun: req.query.dryRun === "true",
+          resync: req.query.resync === "true",
           actor: "api-bearer",
           source: "api",
-          dryRun,
-          resync,
-        });
-        bus.emit({ type: "run", run: toView(run) });
-        res.json({
-          folder: m.name,
-          path1,
-          path2,
-          runId: run.id,
-          filtersFile: filter.path,
-          ...(flagPlan.warnings.length > 0 ? { warnings: flagPlan.warnings } : {}),
-          ...out,
-        });
-        return;
-      }
-
-      // Synchronous: it is already over by the time we get here.
-      db.run(
-        `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
-         VALUES (?, 'api-bearer', 'api', 'folder', ?, ?, ?, ?)`,
-        [new Date().toISOString(), m.name, "bisync", dryRun ? "dry-run" : "ok", note],
+        },
       );
-      announce(m.name, "applied");
-      res.json({
-        folder: m.name,
-        path1,
-        path2,
-        filtersFile: filter.path,
-        ...(flagPlan.warnings.length > 0 ? { warnings: flagPlan.warnings } : {}),
-        ...out,
-      });
+      const { out, run, ...rest } = started;
+      res.json({ ...rest, ...(run ? { runId: run.id } : {}), ...out });
     } catch (err) {
-      if (err instanceof RcloneError) {
-        res.status(502).json({
-          // rclone says "bisync aborted" and nothing else; the filter it was
-          // told to open is the first thing worth checking.
-          error: `${err.message} — rclone was asked to load ${filter.path}${
-            filter.local ? "" : " (a path on the rclone host, not this one)"
-          }`,
-          endpoint: err.endpoint,
-          upstreamStatus: err.status,
-          filtersFile: filter.path,
-        });
+      if (err instanceof BisyncStartError) {
+        res.status(err.status).json(err.body);
         return;
       }
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ error: errorMessage(err) });
     }
   });
 

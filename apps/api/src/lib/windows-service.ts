@@ -92,8 +92,28 @@ export function getWindow(db: Db, id: number): WindowRow | null {
   return (db.query("SELECT * FROM sync_windows WHERE id = ?").get(id) as WindowRow | null) ?? null;
 }
 
-export function listWindows(db: Db, limit = 50): WindowRow[] {
-  return db.query("SELECT * FROM sync_windows ORDER BY id DESC LIMIT ?").all(limit) as WindowRow[];
+export interface ListOpts {
+  limit?: number;
+  /** Only rows with an id below this one — the cursor for "load older". */
+  before?: number;
+  folder?: string;
+}
+
+export function listWindows(db: Db, limitOrOpts: number | ListOpts = 50): WindowRow[] {
+  const opts = typeof limitOrOpts === "number" ? { limit: limitOrOpts } : limitOrOpts;
+  const where: string[] = [];
+  const params: Array<number | string> = [];
+  if (opts.before !== undefined) {
+    where.push("id < ?");
+    params.push(opts.before);
+  }
+  if (opts.folder) {
+    where.push("folder = ?");
+    params.push(opts.folder);
+  }
+  return db
+    .query(`SELECT * FROM sync_windows${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY id DESC LIMIT ?`)
+    .all(...params, opts.limit ?? 50) as WindowRow[];
 }
 
 export function listActiveWindows(db: Db): WindowRow[] {
