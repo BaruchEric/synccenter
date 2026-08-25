@@ -1227,6 +1227,128 @@ describe("POST /folders/:name/sync — every leg", () => {
   });
 });
 
+describe("GET /jobs — every leg under one id", () => {
+  const armFilter = () => {
+    mkdirSync(join(configDir, "compiled", "base-binaries"), { recursive: true });
+    writeFileSync(join(configDir, "compiled", "base-binaries", "filter.rclone"), "+ **\n");
+  };
+  beforeEach(async () => {
+    armFilter();
+    rcloneFake.nextJobStatus = { finished: true, success: true };
+    await tracker.tick();
+    for (const w of (await (await call("/windows")).json() as { windows: Array<{ id: number; state: string }> }).windows) {
+      if (w.state === "running") await engine.stopWindow(w.id);
+    }
+  });
+
+  it("a Sync now on a cloud-only folder is one job that settles with the run's numbers", async () => {
+    rcloneFake.nextJobStatus = { finished: false };
+    const started = (await (await call("/folders/shared/sync", { method: "POST" })).json()) as {
+      job: { id: number; kind: string; state: string; runs: Array<{ id: number; job_id: number }> };
+    };
+    expect(started.job.kind).toBe("bisync");
+    expect(started.job.state).toBe("running");
+    expect(started.job.runs[0]!.job_id).toBe(started.job.id);
+
+    const seen: Array<{ id: number; state: string }> = [];
+    const unsub = bus.subscribe((e) => {
+      if (e.type === "job") seen.push({ id: e.job.id, state: e.job.state });
+    });
+    rcloneFake.nextStats = { bytes: 2048, totalBytes: 2048, transfers: 2, checks: 9, errors: 0 };
+    rcloneFake.nextJobStatus = { finished: true, success: true };
+    await tracker.tick();
+    unsub();
+
+    const r = await call(`/jobs/${started.job.id}`);
+    expect(r.status).toBe(200);
+    const { job } = (await r.json()) as {
+      job: {
+        state: string;
+        finished_at: string | null;
+        runs: Array<{ state: string }>;
+        totals: { bytes: number; transfers: number; checks: number; legs: number; legsDone: number; seconds: number };
+      };
+    };
+    expect(job.state).toBe("done");
+    expect(job.finished_at).not.toBeNull();
+    expect(job.runs[0]!.state).toBe("done");
+    expect(job.totals).toMatchObject({ bytes: 2048, transfers: 2, checks: 9, legs: 1, legsDone: 1 });
+    // The bus said so too, once, when it closed.
+    expect(seen).toEqual([{ id: started.job.id, state: "done" }]);
+
+    const list = (await (await call("/jobs?folder=shared&kind=bisync&limit=1")).json()) as {
+      jobs: Array<{ id: number; folder: string; kind: string }>;
+      activeCount: number;
+      nextBefore: number | null;
+    };
+    expect(list.jobs[0]!.id).toBe(started.job.id);
+    expect(list.jobs.every((j) => j.folder === "shared" && j.kind === "bisync")).toBe(true);
+    expect(list.nextBefore).toBe(started.job.id);
+    expect((await (await call("/jobs?state=running")).json() as { jobs: unknown[] }).jobs).toEqual([]);
+  });
+
+  it("stopping a job closes its window and drops the queued cloud leg", async () => {
+    const started = (await (await call("/folders/held-cloud/sync", { method: "POST" })).json()) as {
+      job: { id: number; kind: string; cloudPending: boolean; after: number[] };
+      windows: Array<{ id: number }>;
+    };
+    expect(started.job.kind).toBe("sync");
+    expect(started.job.cloudPending).toBe(true);
+    expect(started.job.after).toEqual([started.windows[0]!.id]);
+
+    const stop = await call(`/jobs/${started.job.id}/stop`, { method: "POST" });
+    expect(stop.status).toBe(200);
+    const { job } = (await stop.json()) as {
+      job: { state: string; cloudPending: boolean; note: string; windows: Array<{ state: string }>; runs: unknown[] };
+    };
+    expect(job.state).toBe("stopped");
+    expect(job.cloudPending).toBe(false);
+    expect(job.note).toContain("stopped from the dashboard");
+    expect(job.windows[0]!.state).toBe("stopped");
+    expect(job.runs).toEqual([]);
+    await engine.tick();
+    expect(rcloneFake.calls.filter((c) => c.method === "bisync")).toHaveLength(0);
+    // The folder is paused again on the held member.
+    expect(qnapFake.calls.some((c) => c.method === "pauseFolder" && c.args[0] === "held-cloud")).toBe(true);
+
+    expect((await call(`/jobs/${started.job.id}/stop`, { method: "POST" })).status).toBe(409);
+    expect((await call("/jobs/999999")).status).toBe(404);
+  });
+
+  it("a bisync started on its own and a window on its own are jobs too", async () => {
+    rcloneFake.nextJobStatus = { finished: false };
+    const b = (await (await call("/folders/shared/bisync?async=true", { method: "POST" })).json()) as { runId: number };
+    const run = (await (await call(`/runs/${b.runId}`)).json()) as { run: { job_id: number | null } };
+    expect(run.run.job_id).not.toBeNull();
+    const bj = (await (await call(`/jobs/${run.run.job_id}`)).json()) as { job: { kind: string; via: string; cloud: string[] } };
+    expect(bj.job).toMatchObject({ kind: "bisync", via: "manual", cloud: ["gdrive"] });
+
+    const w = (await (await call("/folders/held-cloud/sync?cloud=false", { method: "POST" })).json()) as {
+      job: { kind: string; hosts: string[]; cloud: string[] };
+      windows: Array<{ job_id: number }>;
+    };
+    expect(w.job).toMatchObject({ kind: "window", hosts: ["qnap-ts453d"], cloud: [] });
+    expect(w.windows[0]!.job_id).toBeGreaterThan(0);
+  });
+
+  it("GET /log takes since/until so a job's story can be cut out of the folder's", async () => {
+    const all = (await (await call("/log?folder=shared&limit=500")).json()) as { lines: Array<{ ts: string }> };
+    expect(all.lines.length).toBeGreaterThan(2);
+    const newest = all.lines[0]!.ts;
+    const oldest = all.lines[all.lines.length - 1]!.ts;
+    const cut = (await (await call(`/log?folder=shared&since=${encodeURIComponent(newest)}&limit=500`)).json()) as {
+      lines: Array<{ ts: string }>;
+    };
+    expect(cut.lines.length).toBeGreaterThan(0);
+    expect(cut.lines.every((l) => l.ts >= newest)).toBe(true);
+    const upTo = (await (await call(`/log?folder=shared&until=${encodeURIComponent(oldest)}&limit=500`)).json()) as {
+      lines: Array<{ ts: string }>;
+    };
+    expect(upTo.lines.every((l) => l.ts <= oldest)).toBe(true);
+    expect(upTo.lines.length).toBeLessThan(all.lines.length);
+  });
+});
+
 describe("GET /log — the server's own story", () => {
   it("lists newest first, filters, and pages with a cursor", async () => {
     serverLog.info("system", "alpha line for the log test", { folder: "shared" });

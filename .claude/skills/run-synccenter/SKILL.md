@@ -136,7 +136,8 @@ the field with `find` (**not** screenshot coordinates — see Gotchas), click by
 | `/activity` | the timeline; live runs render at the `now` line with a progress meter |
 | `/folders` | list + Edit / Run / Apply / Pause / Disable / Delete per row |
 | `/folders/new`, `/folders/arik/edit` | the manifest editor |
-| `/history` | the whole ledger with filters, plus bisync-run and sync-window tables |
+| `/history` | the whole ledger with filters, plus jobs, bisync-run and sync-window tables |
+| `/history?view=jobs`, `/history/jobs/3` | jobs (every leg of a press under one id) and the job page: route, legs, sum, figures, story |
 | `/logs` | SyncCenter's own log (live), Syncthing's log per host, per-file folder errors |
 | `/folders/arik` | manifest JSON + live per-host state + Dry-run/Apply/Pause/Resume |
 | `/rules`, `/hosts`, `/conflicts` | ruleset, host, conflict views |

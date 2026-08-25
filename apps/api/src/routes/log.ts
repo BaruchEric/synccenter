@@ -22,6 +22,8 @@ export function logRouter(log: Log): Router {
       ...(isLevel(level) ? { level } : {}),
       ...(typeof req.query.source === "string" && req.query.source ? { source: req.query.source } : {}),
       ...(typeof req.query.q === "string" && req.query.q ? { q: req.query.q } : {}),
+      ...(isIso(req.query.since) ? { since: req.query.since } : {}),
+      ...(isIso(req.query.until) ? { until: req.query.until } : {}),
     });
     res.json({
       lines,
@@ -34,4 +36,9 @@ export function logRouter(log: Log): Router {
 
 function isLevel(v: string): v is LogLevel {
   return LEVELS.has(v as LogLevel);
+}
+
+/** A timestamp the row's `ts` (ISO, UTC) compares against as text. */
+function isIso(v: unknown): v is string {
+  return typeof v === "string" && v.length >= 10 && !Number.isNaN(Date.parse(v));
 }

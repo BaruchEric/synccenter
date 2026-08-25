@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   api,
   type ApplyHistory,
   type FoldersList,
   type HistoryKind,
   type HistoryRow,
+  type JobKind,
+  type JobState,
+  type JobsList,
+  type JobView,
   type RunsList,
   type RunView,
   type WindowsList,
@@ -20,11 +24,12 @@ import { Tag } from "@/components/Tag";
  * Everything that ever finished, as tables you can filter and page.
  *
  * The activity timeline shows the last few dozen ledger rows around "now";
- * this is the whole ledger, plus the two records that carry the numbers the
- * ledger's one-line note cannot: bisync runs (bytes, transfers, checks) and
- * sync windows (how much was in sync, what was still needed, which peers
- * caught up). Same folder filter across all three, so "what happened to
- * baruchrio" is one selection, not three searches.
+ * this is the whole ledger, plus the records that carry the numbers the
+ * ledger's one-line note cannot: jobs (every leg of a press under one id,
+ * with the sum), bisync runs (bytes, transfers, checks) and sync windows
+ * (how much was in sync, what was still needed, which peers caught up).
+ * Same folder filter across all of them, so "what happened to baruchrio" is
+ * one selection, not four searches.
  */
 export function History() {
   const [params, setParams] = useSearchParams();
@@ -33,6 +38,8 @@ export function History() {
   const folder = params.get("folder") ?? "";
   const kind = parseKind(params.get("kind"));
   const result = parseResult(params.get("result"));
+  const jobKind = parseJobKind(params.get("kind"));
+  const jobState = parseJobState(params.get("state"));
   const set = (patch: Record<string, string>) => {
     const next = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) {
@@ -80,6 +87,34 @@ export function History() {
           onChange={(v) => set({ folder: v })}
           options={[["", "every folder"], ...(folders.data?.folders ?? []).map((f) => [f, f] as [string, string])]}
         />
+        {view === "jobs" && (
+          <>
+            <Select
+              label="kind"
+              value={jobKind}
+              onChange={(v) => set({ kind: v })}
+              options={[
+                ["", "every kind"],
+                ["sync", "full sync"],
+                ["bisync", "bisync"],
+                ["window", "sync window"],
+              ]}
+            />
+            <Select
+              label="result"
+              value={jobState}
+              onChange={(v) => set({ state: v })}
+              options={[
+                ["", "any result"],
+                ["running", "running"],
+                ["done", "done"],
+                ["partial", "partial"],
+                ["failed", "failed"],
+                ["stopped", "stopped"],
+              ]}
+            />
+          </>
+        )}
         {view === "ledger" && (
           <>
             <Select
@@ -109,15 +144,17 @@ export function History() {
       </div>
 
       {view === "ledger" && <Ledger folder={folder} kind={kind} result={result} now={now} />}
+      {view === "jobs" && <Jobs folder={folder} kind={jobKind} state={jobState} now={now} />}
       {view === "runs" && <Runs folder={folder} now={now} />}
       {view === "windows" && <Windows folder={folder} now={now} />}
     </div>
   );
 }
 
-type View = "ledger" | "runs" | "windows";
+type View = "ledger" | "jobs" | "runs" | "windows";
 const VIEWS: Array<{ key: View; label: string }> = [
   { key: "ledger", label: "Ledger" },
+  { key: "jobs", label: "Jobs" },
   { key: "runs", label: "Bisync runs" },
   { key: "windows", label: "Sync windows" },
 ];
@@ -131,6 +168,12 @@ function parseKind(v: string | null): HistoryKind | "" {
 function parseResult(v: string | null): HistoryRow["result"] | "" {
   return v === "ok" || v === "error" || v === "dry-run" ? v : "";
 }
+function parseJobKind(v: string | null): JobKind | "" {
+  return v === "sync" || v === "bisync" || v === "window" ? v : "";
+}
+function parseJobState(v: string | null): JobState | "" {
+  return v === "running" || v === "done" || v === "partial" || v === "failed" || v === "stopped" ? v : "";
+}
 
 const PAGE = 50;
 
@@ -143,6 +186,13 @@ const RESULT_TONE: Record<string, string> = {
   timeout: "text-signal",
   stopped: "text-dry",
   running: "text-run",
+  partial: "text-signal",
+};
+
+const JOB_KIND_LABEL: Record<JobKind, string> = {
+  sync: "full sync",
+  bisync: "bisync",
+  window: "sync window",
 };
 
 const KIND_LABEL: Record<HistoryKind, string> = {
@@ -206,6 +256,124 @@ function Ledger({
   );
 }
 
+function Jobs({
+  folder,
+  kind,
+  state,
+  now,
+}: {
+  folder: string;
+  kind: JobKind | "";
+  state: JobState | "";
+  now: Date;
+}) {
+  const q = useInfiniteQuery({
+    queryKey: ["jobs", "page", folder, kind, state],
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams({ limit: String(PAGE) });
+      if (folder) qs.set("folder", folder);
+      if (kind) qs.set("kind", kind);
+      if (state) qs.set("state", state);
+      if (pageParam) qs.set("before", String(pageParam));
+      return api.get<JobsList>(`/jobs?${qs}`);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.nextBefore ?? undefined,
+    refetchInterval: 15_000,
+  });
+  const rows = useMemo(() => q.data?.pages.flatMap((p) => p.jobs) ?? [], [q.data]);
+  // What the loaded page adds up to. Only what sums is summed.
+  const sum = useMemo(
+    () =>
+      rows.reduce(
+        (acc, j) => ({
+          bytes: acc.bytes + j.totals.bytes,
+          transfers: acc.transfers + j.totals.transfers,
+          seconds: acc.seconds + j.totals.seconds,
+          done: acc.done + (j.state === "done" ? 1 : 0),
+        }),
+        { bytes: 0, transfers: 0, seconds: 0, done: 0 },
+      ),
+    [rows],
+  );
+
+  return (
+    <Table
+      state={q}
+      count={rows.length}
+      empty="No jobs recorded. Every Sync now, Cloud only and scheduled window from here on lands here with its legs and its sum."
+      head={["job", "started", "folder", "kind", "legs", "moved", "files", "took", "result"]}
+      wide
+      foot={
+        <tr className="border-t-[3px] border-double border-rule font-mono tabular-nums text-slate-100">
+          <td className="px-4 py-2.5 text-[11px] uppercase tracking-wider text-dim">sum</td>
+          <td className="whitespace-nowrap px-4 py-2.5 text-dim">
+            {rows.length} loaded{q.hasNextPage ? " of more" : ""}
+          </td>
+          <td className="px-4 py-2.5" />
+          <td className="px-4 py-2.5" />
+          <td className="px-4 py-2.5" />
+          <td className="whitespace-nowrap px-4 py-2.5">{bytes(sum.bytes)}</td>
+          <td className="whitespace-nowrap px-4 py-2.5">{sum.transfers.toLocaleString()}</td>
+          <td className="whitespace-nowrap px-4 py-2.5">{duration(sum.seconds)}</td>
+          <td className="whitespace-nowrap px-4 py-2.5">
+            <span className="text-ok">{sum.done}</span>
+            <span className="text-dim"> done of {rows.length}</span>
+          </td>
+        </tr>
+      }
+    >
+      {rows.map((j: JobView) => (
+        <tr key={j.id} className="border-t border-rule align-top">
+          <td className="whitespace-nowrap py-2 pr-4 font-mono">
+            <Link
+              to={`/history/jobs/${j.id}`}
+              className="text-signal underline decoration-signal/40 underline-offset-2 hover:decoration-signal focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+            >
+              #{j.id}
+            </Link>
+          </td>
+          <When at={new Date(j.started_at)} now={now} />
+          <td className="whitespace-nowrap py-2 pr-4 font-mono text-slate-100">{j.folder}</td>
+          <td className="whitespace-nowrap py-2 pr-4">
+            <Tag>{JOB_KIND_LABEL[j.kind]}</Tag>
+            {j.via === "schedule" && (
+              <>
+                {" "}
+                <Tag>scheduled</Tag>
+              </>
+            )}
+          </td>
+          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs text-slate-300">{legsLine(j)}</td>
+          <td className="whitespace-nowrap py-2 pr-4 font-mono tabular-nums text-slate-300">{bytes(j.totals.bytes)}</td>
+          <td className="whitespace-nowrap py-2 pr-4 font-mono tabular-nums text-slate-300">
+            {j.totals.transfers.toLocaleString()}
+          </td>
+          <td className="whitespace-nowrap py-2 pr-4 font-mono tabular-nums text-slate-300">{duration(j.totals.seconds)}</td>
+          <td className={`py-2 font-mono ${RESULT_TONE[j.state] ?? "text-dim"}`}>
+            {j.state}
+            <span className="block text-[11px] text-dim">
+              {j.totals.legsDone}/{j.totals.legs} leg{j.totals.legs === 1 ? "" : "s"}
+              {j.totals.errors > 0 ? ` · ${j.totals.errors.toLocaleString()} errors` : ""}
+            </span>
+          </td>
+        </tr>
+      ))}
+    </Table>
+  );
+}
+
+/** The legs a job ran, in order: `window qnap → bisync gdrive`. */
+function legsLine(j: JobView): string {
+  const legs = [
+    ...j.windows.map((w) => ({ at: w.started_at, text: `window ${w.host}` })),
+    ...j.runs.map((r) => ({ at: r.started_at, text: `bisync ${r.member ?? "cloud"}` })),
+  ].sort((a, b) => a.at.localeCompare(b.at));
+  const planned = j.cloudPending ? j.cloud.map((c) => `bisync ${c} (queued)`) : [];
+  const text = [...legs.map((l) => l.text), ...planned].join(" → ");
+  return text || (j.legsFailed > 0 ? "no leg left" : "—");
+}
+
 function Runs({ folder, now }: { folder: string; now: Date }) {
   const q = useInfiniteQuery({
     queryKey: ["runs", "page", folder],
@@ -226,7 +394,7 @@ function Runs({ folder, now }: { folder: string; now: Date }) {
       state={q}
       count={rows.length}
       empty="No bisync runs recorded. Runs started from this dashboard land here; the nightly crontab legs run on the anchor host and do not report."
-      head={["started", "folder → member", "state", "moved", "checked", "took", "detail"]}
+      head={["started", "folder → member", "state", "moved", "checked", "took", "detail", "job"]}
     >
       {rows.map((r: RunView) => (
         <tr key={r.id} className="border-t border-rule align-top">
@@ -270,6 +438,7 @@ function Runs({ folder, now }: { folder: string; now: Date }) {
               <span className="text-dim">{r.actor} · {r.source}</span>
             )}
           </td>
+          <JobCell id={r.job_id} />
         </tr>
       ))}
     </Table>
@@ -296,7 +465,7 @@ function Windows({ folder, now }: { folder: string; now: Date }) {
       state={q}
       count={rows.length}
       empty="No sync windows recorded. Scheduled and manual members get one row per window."
-      head={["opened", "folder on host", "via", "state", "in sync", "still needed", "peers", "took", "detail"]}
+      head={["opened", "folder on host", "via", "state", "in sync", "still needed", "peers", "took", "detail", "job"]}
       wide
     >
       {rows.map((w: WindowView) => (
@@ -342,9 +511,28 @@ function Windows({ folder, now }: { folder: string; now: Date }) {
               </span>
             )}
           </td>
+          <JobCell id={w.job_id} />
         </tr>
       ))}
     </Table>
+  );
+}
+
+/** The job a leg belongs to; rows from before jobs existed have none. */
+function JobCell({ id }: { id: number | null }) {
+  return (
+    <td className="whitespace-nowrap py-2 font-mono text-xs">
+      {id == null ? (
+        <span className="text-dim">—</span>
+      ) : (
+        <Link
+          to={`/history/jobs/${id}`}
+          className="text-slate-300 underline decoration-rule underline-offset-2 hover:text-signal focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+        >
+          #{id}
+        </Link>
+      )}
+    </td>
   );
 }
 
@@ -380,6 +568,7 @@ function Table({
   empty,
   head,
   wide,
+  foot,
   children,
 }: {
   state: PagedState;
@@ -388,6 +577,8 @@ function Table({
   head: string[];
   /** Nine columns of numbers: keep the head on one line each. */
   wide?: boolean;
+  /** A ruled sum row under the body. */
+  foot?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -414,6 +605,7 @@ function Table({
               </tr>
             </thead>
             <tbody className="[&>tr>td:first-child]:pl-4 [&>tr>td:last-child]:pr-4">{children}</tbody>
+            {foot && <tfoot>{foot}</tfoot>}
           </table>
         </div>
       )}

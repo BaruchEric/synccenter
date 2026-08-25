@@ -122,6 +122,8 @@ export interface RunView {
   source: string;
   dry_run: number;
   resync: number;
+  /** The job this run is a leg of; null on rows from before jobs existed. */
+  job_id: number | null;
 }
 export interface RunsList {
   runs: RunView[];
@@ -155,6 +157,8 @@ export interface WindowView {
   phase: WindowPhase;
   /** 0–1 of the tree in sync locally, or null while scanning. */
   fraction: number | null;
+  /** The job this window is a leg of; null on rows from before jobs existed. */
+  job_id: number | null;
 }
 export interface WindowsList {
   windows: WindowView[];
@@ -170,6 +174,65 @@ export interface SyncNowResult {
   windows: WindowView[];
   failed: Array<{ host: string; error: string }>;
   cloud: CloudLeg | null;
+  /** The job every leg above belongs to. */
+  job: JobView;
+}
+/**
+ * One unit of work the API drove: `sync` is the Sync now chain (windows,
+ * then the cloud bisync), `window` one window on its own, `bisync` one
+ * bisync on its own. Every window and run row points at its job.
+ */
+export type JobKind = "sync" | "bisync" | "window";
+/**
+ * `done`: every leg finished clean. `stopped`: a leg was closed by hand and
+ * nothing else went wrong. `failed`: no leg finished clean. `partial`: some
+ * did, some did not.
+ */
+export type JobState = "running" | "done" | "partial" | "failed" | "stopped";
+export interface JobTotals {
+  bytes: number;
+  totalBytes: number;
+  transfers: number;
+  checks: number;
+  listed: number;
+  errors: number;
+  needFiles: number;
+  needBytes: number;
+  /** Wall clock of the whole job, to now while it runs. */
+  seconds: number;
+  windowSeconds: number;
+  runSeconds: number;
+  capSeconds: number;
+  legs: number;
+  legsDone: number;
+  legsRunning: number;
+  legsFailed: number;
+}
+export interface JobView {
+  id: number;
+  folder: string;
+  kind: JobKind;
+  via: "manual" | "schedule";
+  started_at: string;
+  finished_at: string | null;
+  state: JobState;
+  hosts: string[];
+  cloud: string[];
+  after: number[];
+  cloudPending: boolean;
+  legsFailed: number;
+  note: string | null;
+  actor: string;
+  source: string;
+  /** Oldest first: the order the legs ran in. */
+  windows: WindowView[];
+  runs: RunView[];
+  totals: JobTotals;
+}
+export interface JobsList {
+  jobs: JobView[];
+  activeCount: number;
+  nextBefore: number | null;
 }
 /** One line of SyncCenter's own log (GET /log, and `log` events). */
 export type LogLevel = "info" | "warn" | "error";

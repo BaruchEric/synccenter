@@ -1,6 +1,7 @@
 import type { RcloneClient } from "@synccenter/adapters";
 import type { Db } from "../db.ts";
 import type { EventBus } from "./bus.ts";
+import { settleAndAnnounce } from "./jobs-service.ts";
 import { errorText, type Log } from "./log.ts";
 import {
   finishRun,
@@ -168,6 +169,7 @@ export class RunTracker {
       },
     });
     this.onFinished?.(row);
+    settleAndAnnounce(this.db, this.bus, row.job_id);
   }
 }
 

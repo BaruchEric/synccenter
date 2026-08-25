@@ -103,6 +103,50 @@ const SCHEMA = [
      data TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS log_lines_folder ON log_lines (folder, id DESC)`,
+
+  // One row per unit of work the API drives, whatever its shape: a Sync now
+  // chain (windows, then the cloud bisync), a scheduled window on its own, a
+  // bisync started on its own. Runs and windows point at their job, so "what
+  // did that press do" is one id rather than a search across two tables.
+  // `hosts`/`cloud` are the legs planned at the start (JSON arrays), `after`
+  // the window ids the cloud leg waits on (own or adopted), `legs_failed`
+  // the legs that never got a row — a window that could not open, a bisync
+  // that did not start — with the reason in `note`.
+  `CREATE TABLE IF NOT EXISTS jobs (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     folder TEXT NOT NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('sync','bisync','window')),
+     via TEXT NOT NULL CHECK (via IN ('manual','schedule')),
+     started_at TEXT NOT NULL,
+     finished_at TEXT,
+     state TEXT NOT NULL CHECK (state IN ('running','done','partial','failed','stopped')),
+     hosts TEXT NOT NULL DEFAULT '[]',
+     cloud TEXT NOT NULL DEFAULT '[]',
+     after TEXT NOT NULL DEFAULT '[]',
+     cloud_pending INTEGER NOT NULL DEFAULT 0,
+     legs_failed INTEGER NOT NULL DEFAULT 0,
+     note TEXT,
+     actor TEXT NOT NULL,
+     source TEXT NOT NULL CHECK (source IN ('api','cli','ui','mcp','schedule'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS jobs_active ON jobs (state) WHERE state = 'running'`,
+  `CREATE INDEX IF NOT EXISTS jobs_recent ON jobs (started_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS jobs_folder ON jobs (folder, id DESC)`,
+];
+
+/**
+ * Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS
+ * leaves an existing table alone, so these are applied one by one against
+ * `PRAGMA table_info`; a database from before the column gets it, one from
+ * after is untouched. Rows that predate the column read NULL.
+ */
+const COLUMNS: Array<[table: string, column: string, ddl: string]> = [
+  ["runs", "job_id", "INTEGER"],
+  ["sync_windows", "job_id", "INTEGER"],
+];
+const COLUMN_INDEXES = [
+  `CREATE INDEX IF NOT EXISTS runs_job ON runs (job_id)`,
+  `CREATE INDEX IF NOT EXISTS sync_windows_job ON sync_windows (job_id)`,
 ];
 
 export function openDb(path: string): Db {
@@ -110,5 +154,14 @@ export function openDb(path: string): Db {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   for (const stmt of SCHEMA) db.exec(stmt);
+  for (const [table, column, ddl] of COLUMNS) {
+    if (!hasColumn(db, table, column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
+  for (const stmt of COLUMN_INDEXES) db.exec(stmt);
   return db;
+}
+
+function hasColumn(db: Db, table: string, column: string): boolean {
+  const cols = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return cols.some((c) => c.name === column);
 }

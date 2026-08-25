@@ -68,6 +68,8 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         if (e.run.state !== "running") {
           void qcRef.current.invalidateQueries({ queryKey: ["apply-history"] });
           void qcRef.current.invalidateQueries({ queryKey: ["folder-state", e.run.folder] });
+          void qcRef.current.invalidateQueries({ queryKey: ["jobs"] });
+          void qcRef.current.invalidateQueries({ queryKey: ["job"] });
         }
         return;
       }
@@ -80,7 +82,16 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         if (e.window.state !== "running") {
           void qcRef.current.invalidateQueries({ queryKey: ["apply-history"] });
           void qcRef.current.invalidateQueries({ queryKey: ["folder-state", e.window.folder] });
+          void qcRef.current.invalidateQueries({ queryKey: ["jobs"] });
+          void qcRef.current.invalidateQueries({ queryKey: ["job"] });
         }
+        return;
+      }
+      if (e.type === "job") {
+        // Jobs are read through react-query (they are small and change
+        // rarely); the event just says which cached copies are stale.
+        void qcRef.current.invalidateQueries({ queryKey: ["jobs"] });
+        void qcRef.current.invalidateQueries({ queryKey: ["job", String(e.job.id)] });
         return;
       }
       if (e.type === "log") {

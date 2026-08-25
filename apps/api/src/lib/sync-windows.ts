@@ -5,6 +5,7 @@ import type { Db } from "../db.ts";
 import type { HostRegistry } from "../registry.ts";
 import type { EventBus } from "./bus.ts";
 import { listYamlNames } from "./fs.ts";
+import { settleAndAnnounce, startJob } from "./jobs-service.ts";
 import { errorText, type Log } from "./log.ts";
 import { firesBetween } from "./cron-times.ts";
 import {
@@ -165,6 +166,11 @@ export class SyncWindowEngine {
   /**
    * Open a window: record it, resume the folder on that host, kick a rescan.
    * Throws SyncWindowError when the pair is unknown, realtime, or already open.
+   *
+   * Every window is a leg of a job. A caller running a chain (Sync now)
+   * passes its job; a window opened on its own — a schedule firing, a
+   * `?cloud=false` press — becomes a one-leg job of its own here, so the
+   * history has one shape for everything.
    */
   async open(
     folderName: string,
@@ -172,6 +178,7 @@ export class SyncWindowEngine {
     via: WindowRow["via"],
     actor: string,
     source: WindowRow["source"],
+    opts: { jobId?: number } = {},
   ): Promise<WindowRow> {
     let folder: FolderManifest;
     try {
@@ -193,6 +200,18 @@ export class SyncWindowEngine {
       throw new SyncWindowError(`a window is already open for ${folderName} on ${host}`, "ALREADY_OPEN");
     }
 
+    const jobId =
+      opts.jobId ??
+      startJob(this.db, {
+        folder: folderName,
+        kind: "window",
+        via,
+        hosts: [host],
+        cloud: [],
+        actor,
+        source,
+        startedAt: this.now(),
+      }).id;
     const row = startWindow(this.db, {
       folder: folderName,
       host,
@@ -201,6 +220,7 @@ export class SyncWindowEngine {
       actor,
       source,
       startedAt: this.now(),
+      jobId,
     });
     this.announce(row);
     this.bus.emit({ type: "folder", folder: folderName, action: "resumed" });
@@ -448,6 +468,9 @@ export class SyncWindowEngine {
 
     this.announce(row);
     this.bus.emit({ type: "folder", folder: row.folder, action: "paused" });
+    // After the window event, so a chain waiting on this window (Sync now)
+    // has queued its cloud leg before the job is asked whether it is over.
+    settleAndAnnounce(this.db, this.bus, row.job_id);
   }
 
   private announce(row: WindowRow): void {

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { RcloneClient, RcloneError } from "@synccenter/adapters";
 import type { Db } from "../db.ts";
 import type { EventBus } from "../lib/bus.ts";
+import { settleAndAnnounce } from "../lib/jobs-service.ts";
 import { finishRun, getRun, listActiveRuns, listRuns, toView } from "../lib/runs-service.ts";
 
 export function runsRouter(db: Db, bus: EventBus, rclone: RcloneClient | null): Router {
@@ -59,7 +60,10 @@ export function runsRouter(db: Db, bus: EventBus, rclone: RcloneClient | null): 
       }
     }
     const stopped = finishRun(db, row.id, "stopped", "stopped from the dashboard");
-    if (stopped) bus.emit({ type: "run", run: toView(stopped) });
+    if (stopped) {
+      bus.emit({ type: "run", run: toView(stopped) });
+      settleAndAnnounce(db, bus, stopped.job_id);
+    }
     res.json({ run: stopped ? toView(stopped) : null });
   });
 

@@ -155,11 +155,13 @@ function Row({
         <p key={`w-${w.id}`} className="mt-1 font-mono text-[11px] text-run">
           window open on {w.host} — {w.phase}
           {w.fraction != null && w.phase !== "scanning" ? ` · ${Math.round(w.fraction * 100)}% in sync` : ""}
+          <JobLink id={w.job_id} />
         </p>
       ))}
       {runs.map((r) => (
         <p key={r.id} className="mt-1 font-mono text-[11px] text-signal">
           bisync → {r.member ?? "cloud"} running — {r.phase === "transferring" ? `${Math.round((r.fraction ?? 0) * 100)}%` : "checking"}
+          <JobLink id={r.job_id} />
         </p>
       ))}
 
@@ -173,5 +175,21 @@ function Row({
         <FolderActions name={name} manifest={m} hasCloudMember={hasCloud} />
       </div>
     </li>
+  );
+}
+
+/** The job a live leg belongs to, as a link; nothing for rows from before jobs existed. */
+function JobLink({ id }: { id: number | null }) {
+  if (id == null) return null;
+  return (
+    <>
+      {" · "}
+      <Link
+        to={`/history/jobs/${id}`}
+        className="text-slate-300 underline decoration-rule underline-offset-2 hover:text-signal focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+      >
+        job #{id}
+      </Link>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api, heldMembers, type FolderManifest, type SyncNowResult } from "@/lib/api";
 
 /**
@@ -25,14 +26,14 @@ export function FolderActions({
 }) {
   const qc = useQueryClient();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [note, setNote] = useState<{ tone: "ok" | "fail"; text: string } | null>(null);
+  const [note, setNote] = useState<Note | null>(null);
 
   const disabled = manifest?.enabled === false;
   const held = manifest ? heldMembers(manifest) : [];
   const canSync = held.length > 0 || hasCloudMember === true;
 
   const refresh = () => {
-    for (const k of ["folders", "folder", "folder-state", "schedule", "apply-history"]) {
+    for (const k of ["folders", "folder", "folder-state", "schedule", "apply-history", "jobs"]) {
       void qc.invalidateQueries({ queryKey: [k] });
       void qc.invalidateQueries({ queryKey: [k, name] });
     }
@@ -142,6 +143,17 @@ export function FolderActions({
           className={`basis-full text-[11px] ${note.tone === "ok" ? "text-ok" : "text-fail"}`}
         >
           {note.text}
+          {note.job && (
+            <>
+              {" "}
+              <Link
+                to={`/history/jobs/${note.job}`}
+                className="font-mono text-signal underline decoration-signal/40 underline-offset-2 hover:decoration-signal focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+              >
+                job #{note.job}
+              </Link>
+            </>
+          )}
         </span>
       )}
     </div>
@@ -149,6 +161,13 @@ export function FolderActions({
 }
 
 type Verb = "bisync" | "sync" | "apply" | "pause" | "resume" | "enable" | "disable" | "delete";
+
+/** What the last verb said, and the job to follow if it started one. */
+interface Note {
+  tone: "ok" | "fail";
+  text: string;
+  job?: number;
+}
 
 const DONE: Record<Verb, string> = {
   bisync: "Bisync started on the anchor — watch it on the timeline.",
@@ -165,8 +184,8 @@ function isSyncNowResult(v: unknown): v is SyncNowResult {
   return typeof v === "object" && v !== null && "windows" in v && "cloud" in v;
 }
 
-/** One sentence on what Sync now set in motion, leg by leg. */
-function describeSyncNow(r: SyncNowResult): { tone: "ok" | "fail"; text: string } {
+/** One sentence on what Sync now set in motion, leg by leg, and the job to follow. */
+function describeSyncNow(r: SyncNowResult): Note {
   const parts: string[] = [];
   let tone: "ok" | "fail" = "ok";
   const open = r.windows.filter((w) => w.state === "running");
@@ -189,7 +208,7 @@ function describeSyncNow(r: SyncNowResult): { tone: "ok" | "fail"; text: string 
     }
   }
   const text = parts.length > 0 ? parts.join(" · ") : "nothing to do";
-  return { tone, text: `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}.` };
+  return { tone, text: `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}.`, job: r.job.id };
 }
 
 function Action({

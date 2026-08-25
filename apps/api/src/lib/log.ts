@@ -45,6 +45,9 @@ export interface LogListOpts {
   limit?: number;
   /** Only lines with an id below this one — the cursor for "load older". */
   before?: number;
+  /** ISO timestamps: only lines at or after `since`, at or before `until`. */
+  since?: string;
+  until?: string;
   folder?: string;
   level?: LogLevel;
   source?: string;
@@ -143,6 +146,14 @@ export class Log {
     if (opts.before !== undefined) {
       where.push("id < ?");
       params.push(opts.before);
+    }
+    if (opts.since) {
+      where.push("ts >= ?");
+      params.push(opts.since);
+    }
+    if (opts.until) {
+      where.push("ts <= ?");
+      params.push(opts.until);
     }
     if (opts.folder) {
       where.push("folder = ?");

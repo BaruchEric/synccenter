@@ -16,12 +16,14 @@ import type { ApiConfig } from "./config.ts";
 import { openDb, type Db } from "./db.ts";
 import { startBisync } from "./lib/bisync-service.ts";
 import { EventBus } from "./lib/bus.ts";
+import { abandonStaleJobs } from "./lib/jobs-service.ts";
 import { Log } from "./lib/log.ts";
 import { RunTracker } from "./lib/run-tracker.ts";
 import { abandonStaleRuns } from "./lib/runs-service.ts";
 import { SyncNow } from "./lib/sync-now.ts";
 import { SyncWindowEngine } from "./lib/sync-windows.ts";
 import { abandonStaleWindows } from "./lib/windows-service.ts";
+import { jobsRouter } from "./routes/jobs.ts";
 import { logRouter } from "./routes/log.ts";
 import { windowsRouter } from "./routes/windows.ts";
 import { metricsHandlerFactory } from "./metrics.ts";
@@ -98,14 +100,16 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch, logStdout }
   // than polling ids that may since have been handed to something else.
   const staleRuns = abandonStaleRuns(database);
   const staleWindows = abandonStaleWindows(database);
+  // After the legs: a job settles from what its legs say.
+  const staleJobs = abandonStaleJobs(database);
   log.info(
     "system",
     `SyncCenter ${PKG_VERSION} started${
-      staleRuns + staleWindows > 0
-        ? ` — closed out ${staleRuns} bisync run(s) and ${staleWindows} sync window(s) left open by the previous process`
+      staleRuns + staleWindows + staleJobs > 0
+        ? ` — closed out ${staleRuns} bisync run(s), ${staleWindows} sync window(s) and ${staleJobs} job(s) left open by the previous process`
         : ""
     }`,
-    { data: { version: PKG_VERSION, rclone: rcloneClient !== null, staleRuns, staleWindows } },
+    { data: { version: PKG_VERSION, rclone: rcloneClient !== null, staleRuns, staleWindows, staleJobs } },
   );
   const tracker = new RunTracker({ db: database, bus, rclone: rcloneClient, log });
   const engine = new SyncWindowEngine({ cfg, db: database, bus, registry: reg, log });
@@ -207,6 +211,7 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch, logStdout }
   app.use("/", foldersRouter(cfg, reg, database, rcloneClient, bus, engine, log, syncNow));
   app.use("/", runsRouter(database, bus, rcloneClient));
   app.use("/", windowsRouter(database, engine));
+  app.use("/", jobsRouter(database, bus, engine, rcloneClient));
   app.use("/", eventsRouter(database, bus));
   app.use("/", logRouter(log));
   app.use("/", rulesRouter(cfg));

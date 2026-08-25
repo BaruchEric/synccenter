@@ -9,9 +9,11 @@ import { BisyncStartError, type BisyncStarted, type StartBisyncOpts } from "../s
 import { EventBus } from "../src/lib/bus.ts";
 import { Log, type LogLine } from "../src/lib/log.ts";
 import { HostRegistry } from "../src/registry.ts";
+import { abandonStaleJobs, getJob, settleJob, startJob, toJobView } from "../src/lib/jobs-service.ts";
+import { finishRun, getRun, listRunsForJobs, startRun, toView } from "../src/lib/runs-service.ts";
 import { SyncNow, SyncNowError } from "../src/lib/sync-now.ts";
 import { SyncWindowEngine } from "../src/lib/sync-windows.ts";
-import { getWindow } from "../src/lib/windows-service.ts";
+import { finishWindow, getWindow, startWindow } from "../src/lib/windows-service.ts";
 import { FakeDaemon } from "./helpers/fake-daemon.ts";
 
 const TOKEN = "test-token-of-sufficient-length-1234567890";
@@ -146,6 +148,16 @@ beforeEach(() => {
         throw err;
       }
       const id = nextRun++;
+      // A real run row, so the job has a leg to settle on; the tracker is
+      // not in this test, so tests finish it by hand (see `endRun`).
+      const row = startRun(db, {
+        folder,
+        member: opts.member ?? "gdrive",
+        jobid: 100 + id,
+        actor: opts.actor,
+        source: opts.source,
+        jobId: opts.jobId ?? null,
+      });
       return {
         folder,
         member: opts.member ?? "gdrive",
@@ -153,33 +165,7 @@ beforeEach(() => {
         path2: "gdrive:sync/" + folder,
         filtersFile: "/config/filters/base-binaries.rclone",
         out: { jobid: 100 + id },
-        run: {
-          id,
-          folder,
-          member: opts.member ?? "gdrive",
-          jobid: 100 + id,
-          stats_group: null,
-          started_at: clock.toISOString(),
-          finished_at: null,
-          state: "running",
-          bytes: 0,
-          total_bytes: 0,
-          transfers: 0,
-          checks: 0,
-          listed: 0,
-          errors: 0,
-          speed: 0,
-          eta: null,
-          current: null,
-          error: null,
-          actor: opts.actor,
-          source: opts.source,
-          dry_run: 0,
-          resync: 0,
-          misses: 0,
-          phase: "starting",
-          fraction: null,
-        },
+        run: toView(row),
       };
     },
   });
@@ -197,6 +183,14 @@ const settle = async () => {
 };
 const who = { actor: "tester", source: "api" as const };
 const lines = (): LogLine[] => log.list({ limit: 100 });
+/** What the run tracker does when rclone reports the job over. */
+const endRun = (id: number, state: "done" | "failed" | "stopped" = "done", bytes = 0) => {
+  db.run("UPDATE runs SET bytes = ?, transfers = ?, checks = 3 WHERE id = ?", [bytes, bytes > 0 ? 1 : 0, id]);
+  const row = finishRun(db, id, state, state === "failed" ? "rclone said no" : null)!;
+  settleJob(db, row.job_id!);
+  return row;
+};
+const job = (id: number) => toJobView(db, getJob(db, id)!);
 
 describe("SyncNow", () => {
   it("opens the window, queues the cloud leg, and runs the bisync once the window closes", async () => {
@@ -216,7 +210,7 @@ describe("SyncNow", () => {
     expect(bisyncCalls).toHaveLength(1);
     expect(bisyncCalls[0]).toEqual({
       folder: "cloudy",
-      opts: { member: "gdrive", async: true, actor: "tester", source: "api" },
+      opts: { member: "gdrive", async: true, actor: "tester", source: "api", jobId: out.job.id },
     });
     expect(syncNow.queuedAfter("cloudy")).toBeNull();
 
@@ -340,5 +334,176 @@ describe("SyncNow", () => {
     // be behind the Mac, but Drive being behind the NAS is a separate leg.
     expect(out.cloud?.status).toBe("started");
     expect(bisyncCalls).toHaveLength(1);
+  });
+});
+
+describe("jobs — every leg under one id", () => {
+  it("a Sync now chain is one job: pending, then running, then done", async () => {
+    const out = await syncNow.run("cloudy", who);
+    expect(out.job.kind).toBe("sync");
+    expect(out.job.via).toBe("manual");
+    expect(out.job.state).toBe("running");
+    expect(out.job.cloudPending).toBe(true);
+    expect(out.job.hosts).toEqual(["qnap-ts453d"]);
+    expect(out.job.cloud).toEqual(["gdrive"]);
+    expect(out.job.after).toEqual([out.windows[0]!.id]);
+    expect(out.windows[0]!.job_id).toBe(out.job.id);
+    expect(out.job.windows.map((w) => w.id)).toEqual([out.windows[0]!.id]);
+    expect(out.job.totals.legs).toBe(1);
+
+    await settle();
+    // Window done, bisync started under the same job: still running.
+    const mid = job(out.job.id);
+    expect(mid.state).toBe("running");
+    expect(mid.cloudPending).toBe(false);
+    expect(mid.runs).toHaveLength(1);
+    expect(mid.runs[0]!.job_id).toBe(out.job.id);
+    expect(mid.totals.legs).toBe(2);
+    expect(mid.totals.legsDone).toBe(1);
+    expect(mid.totals.legsRunning).toBe(1);
+
+    endRun(mid.runs[0]!.id, "done", 4096);
+    const done = job(out.job.id);
+    expect(done.state).toBe("done");
+    expect(done.finished_at).not.toBeNull();
+    expect(done.totals.bytes).toBe(4096);
+    expect(done.totals.transfers).toBe(1);
+    expect(done.totals.checks).toBe(3);
+    expect(done.totals.legsDone).toBe(2);
+    expect(done.totals.legsFailed).toBe(0);
+  });
+
+  it("closing the window by hand leaves the job stopped, with the reason", async () => {
+    const out = await syncNow.run("cloudy", who);
+    await engine.stopWindow(out.windows[0]!.id);
+    await tick();
+    const j = job(out.job.id);
+    expect(j.state).toBe("stopped");
+    expect(j.cloudPending).toBe(false);
+    expect(j.note).toContain("closed by hand");
+    expect(j.runs).toEqual([]);
+  });
+
+  it("a window at its cap and a bisync that ran is a partial job", async () => {
+    const out = await syncNow.run("cloudy", who);
+    qnap.state = "syncing";
+    qnap.needBytes = 999;
+    advance(46 * 60_000);
+    await tick();
+    const runs = listRunsForJobs(db, [out.job.id]);
+    expect(runs).toHaveLength(1);
+    endRun(runs[0]!.id);
+    expect(job(out.job.id).state).toBe("partial");
+    expect(job(out.job.id).totals.legsFailed).toBe(1);
+  });
+
+  it("no held member: a bisync job; cloud: false: a window job", async () => {
+    const cloud = await syncNow.run("cloud-only", who);
+    expect(cloud.job.kind).toBe("bisync");
+    expect(cloud.job.windows).toEqual([]);
+    expect(cloud.job.runs).toHaveLength(1);
+    expect(cloud.job.state).toBe("running");
+    endRun(cloud.job.runs[0]!.id);
+    expect(job(cloud.job.id).state).toBe("done");
+
+    const win = await syncNow.run("cloudy", { ...who, cloud: false });
+    expect(win.job.kind).toBe("window");
+    expect(win.job.cloudPending).toBe(false);
+    await settle();
+    expect(job(win.job.id).state).toBe("done");
+    expect(bisyncCalls).toHaveLength(1);
+  });
+
+  it("a second press rides the first press's job", async () => {
+    const first = await syncNow.run("cloudy", who);
+    const second = await syncNow.run("cloudy", who);
+    expect(second.job.id).toBe(first.job.id);
+    expect(db.query("SELECT COUNT(*) AS n FROM jobs").get()).toEqual({ n: 1 });
+  });
+
+  it("a bisync that cannot start is a failed leg with the reason on the job", async () => {
+    bisyncFails = new BisyncStartError("compiled filter.rclone missing at /nope", 409, { error: "missing" });
+    const out = await syncNow.run("cloud-only", who);
+    expect(out.job.state).toBe("failed");
+    expect(out.job.legsFailed).toBe(1);
+    expect(out.job.note).toContain("bisync → gdrive did not start");
+    expect(out.job.totals.legs).toBe(1);
+    expect(out.job.totals.legsFailed).toBe(1);
+
+    // Queued behind a window that then closes clean: partial, not failed.
+    const chain = await syncNow.run("cloudy", who);
+    bisyncFails = new BisyncStartError("rclone is not configured (set SC_RCLONE_URL)", 503, { error: "x" });
+    await settle();
+    const j = job(chain.job.id);
+    expect(j.state).toBe("partial");
+    expect(j.note).toContain("rclone is not configured");
+  });
+
+  it("a window that could not open counts as a failed leg", async () => {
+    await expect(syncNow.run("cloudy", { ...who, host: "mac-studio", cloud: false })).rejects.toBeInstanceOf(SyncNowError);
+    const rows = db.query("SELECT id, state, legs_failed, note FROM jobs").all() as Array<{
+      id: number;
+      state: string;
+      legs_failed: number;
+      note: string;
+    }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.state).toBe("failed");
+    expect(rows[0]!.legs_failed).toBe(1);
+    expect(rows[0]!.note).toContain("realtime");
+  });
+
+  it("a scheduled window is a job of its own, via the schedule", async () => {
+    advance(31 * 60_000); // 09:30 → 10:01, past cloudy's hourly window
+    await engine.checkSchedules();
+    const rows = db.query("SELECT * FROM jobs").all() as Array<{ kind: string; via: string; source: string; state: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "window", via: "schedule", source: "schedule", state: "running" });
+    await settle();
+    expect((db.query("SELECT state FROM jobs").get() as { state: string }).state).toBe("done");
+  });
+
+  it("settles from what the legs say", () => {
+    const mk = (legs: Array<"done" | "failed" | "timeout" | "stopped">, legsFailed = 0) => {
+      const j = startJob(db, { folder: "cloudy", kind: "sync", via: "manual", hosts: [], cloud: [], actor: "t", source: "api" });
+      for (const state of legs) {
+        const w = startWindow(db, { folder: "cloudy", host: "qnap-ts453d", via: "manual", maxMinutes: 1, actor: "t", source: "api", jobId: j.id });
+        finishWindow(db, w.id, state, null);
+      }
+      if (legsFailed > 0) db.run("UPDATE jobs SET legs_failed = ? WHERE id = ?", [legsFailed, j.id]);
+      return settleJob(db, j.id)!.job.state;
+    };
+    expect(mk(["done", "done"])).toBe("done");
+    expect(mk(["done", "stopped"])).toBe("stopped");
+    expect(mk(["stopped"])).toBe("stopped");
+    expect(mk(["timeout"])).toBe("failed");
+    expect(mk(["failed", "timeout"])).toBe("failed");
+    expect(mk(["timeout", "done"])).toBe("partial");
+    expect(mk(["stopped", "failed"])).toBe("partial");
+    expect(mk(["done"], 1)).toBe("partial");
+    expect(mk([], 1)).toBe("failed");
+    expect(mk([])).toBe("failed");
+  });
+
+  it("does not settle while a leg runs or the cloud leg is pending", async () => {
+    const out = await syncNow.run("cloudy", who);
+    expect(settleJob(db, out.job.id)!.changed).toBe(false);
+    await settle();
+    // Window done, run running.
+    expect(settleJob(db, out.job.id)!.changed).toBe(false);
+    expect(getJob(db, out.job.id)!.state).toBe("running");
+  });
+
+  it("a restart closes a job that was waiting on its cloud leg", async () => {
+    const out = await syncNow.run("cloudy", who);
+    // What boot does to the legs, then to the jobs.
+    db.run("UPDATE sync_windows SET state = 'failed', finished_at = ? WHERE state = 'running'", [clock.toISOString()]);
+    expect(abandonStaleJobs(db)).toBe(1);
+    const j = job(out.job.id);
+    expect(j.state).toBe("failed");
+    expect(j.cloudPending).toBe(false);
+    expect(j.note).toContain("SyncCenter restarted");
+    expect(j.legsFailed).toBe(1);
+    expect(getRun(db, 1)).toBeNull();
   });
 });

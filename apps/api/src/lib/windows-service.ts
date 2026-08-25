@@ -22,6 +22,8 @@ export interface WindowRow {
   actor: string;
   source: "api" | "cli" | "ui" | "mcp" | "schedule";
   misses: number;
+  /** The job this window is a leg of; null on rows from before jobs existed. */
+  job_id: number | null;
 }
 
 /**
@@ -69,12 +71,14 @@ export interface StartWindowInput {
   source: WindowRow["source"];
   /** The engine's clock, so tests can drive time. Defaults to real now. */
   startedAt?: Date;
+  /** The job this window belongs to. */
+  jobId?: number | null;
 }
 
 export function startWindow(db: Db, input: StartWindowInput): WindowRow {
   const { lastInsertRowid } = db.run(
-    `INSERT INTO sync_windows (folder, host, via, started_at, state, max_minutes, actor, source)
-     VALUES (?, ?, ?, ?, 'running', ?, ?, ?)`,
+    `INSERT INTO sync_windows (folder, host, via, started_at, state, max_minutes, actor, source, job_id)
+     VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
     [
       input.folder,
       input.host,
@@ -83,6 +87,7 @@ export function startWindow(db: Db, input: StartWindowInput): WindowRow {
       input.maxMinutes,
       input.actor,
       input.source,
+      input.jobId ?? null,
     ],
   );
   return getWindow(db, Number(lastInsertRowid))!;
@@ -120,6 +125,24 @@ export function listActiveWindows(db: Db): WindowRow[] {
   return db
     .query("SELECT * FROM sync_windows WHERE state = 'running' ORDER BY id ASC")
     .all() as WindowRow[];
+}
+
+/** Every window that is a leg of one of these jobs, or one they ride on, oldest first. */
+export function listWindowsForJobs(db: Db, jobIds: number[], extraIds: number[] = []): WindowRow[] {
+  if (jobIds.length === 0 && extraIds.length === 0) return [];
+  const clauses: string[] = [];
+  const params: number[] = [];
+  if (jobIds.length > 0) {
+    clauses.push(`job_id IN (${jobIds.map(() => "?").join(",")})`);
+    params.push(...jobIds);
+  }
+  if (extraIds.length > 0) {
+    clauses.push(`id IN (${extraIds.map(() => "?").join(",")})`);
+    params.push(...extraIds);
+  }
+  return db
+    .query(`SELECT * FROM sync_windows WHERE ${clauses.join(" OR ")} ORDER BY id ASC`)
+    .all(...params) as WindowRow[];
 }
 
 export function activeWindowFor(db: Db, folder: string, host: string): WindowRow | null {

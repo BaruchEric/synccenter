@@ -7,6 +7,7 @@ import type { HostRegistry } from "../registry.ts";
 import type { EventBus } from "./bus.ts";
 import { planBisyncFlags, BisyncFlagError } from "./bisync-flags.ts";
 import { parseFolderByName } from "./fs.ts";
+import { startJob } from "./jobs-service.ts";
 import { errorText, type Log } from "./log.ts";
 import { rcloneFilterPathForDaemon } from "./plan.ts";
 import { startRun, toView, type RunRow, type RunView } from "./runs-service.ts";
@@ -29,6 +30,12 @@ export interface StartBisyncOpts {
   resync?: boolean;
   actor: string;
   source: RunRow["source"];
+  /**
+   * The job this bisync is a leg of. Absent for a bisync started on its
+   * own, which then becomes a one-leg job of its own (async starts only —
+   * a synchronous bisync has no run row to hang a job on).
+   */
+  jobId?: number;
 }
 
 export interface BisyncStarted {
@@ -201,6 +208,17 @@ export async function startBisync(
     // Leave apply_history alone: the tracker writes the row when the job
     // actually ends, with its real result. Recording it here would put a
     // finished-looking event on the timeline for a job still running.
+    const jobId =
+      opts.jobId ??
+      startJob(db, {
+        folder: m.name,
+        kind: "bisync",
+        via: "manual",
+        hosts: [],
+        cloud: [memberName],
+        actor: opts.actor,
+        source: opts.source,
+      }).id;
     const run = startRun(db, {
       folder: m.name,
       member: memberName,
@@ -210,6 +228,7 @@ export async function startBisync(
       source: opts.source,
       dryRun,
       resync,
+      jobId,
     });
     const view = toView(run);
     bus.emit({ type: "run", run: view });

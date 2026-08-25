@@ -115,6 +115,48 @@ export function registerRemoteCommands(program: Command): void {
     });
 
   program
+    .command("jobs")
+    .description("List jobs — every leg of a Sync now, Cloud only or scheduled window under one id, with the sum")
+    .option("--folder <name>", "Only this folder")
+    .option("--limit <n>", "How many to list", "20")
+    .action(async (o: { folder?: string; limit?: string }, cmd: Command) => {
+      const ctx = ctxOf(cmd);
+      try {
+        const api = apiFromCmd(cmd);
+        const qs = new URLSearchParams({ limit: o.limit ?? "20" });
+        if (o.folder) qs.set("folder", o.folder);
+        const r = await api.get<{
+          jobs: Array<{
+            id: number;
+            folder: string;
+            kind: string;
+            via: string;
+            state: string;
+            started_at: string;
+            windows: Array<{ host: string; state: string }>;
+            runs: Array<{ member: string | null; state: string }>;
+            cloudPending: boolean;
+            cloud: string[];
+            totals: { bytes: number; transfers: number; seconds: number; legs: number; legsDone: number };
+          }>;
+          activeCount: number;
+        }>(`/jobs?${qs}`);
+        const lines = r.jobs.map((j) => {
+          const legs = [
+            ...j.windows.map((w) => `window ${w.host} ${w.state}`),
+            ...j.runs.map((x) => `bisync ${x.member ?? "cloud"} ${x.state}`),
+            ...(j.cloudPending ? j.cloud.map((c) => `bisync ${c} queued`) : []),
+          ].join(" → ");
+          const t = j.totals;
+          return `#${j.id} ${j.folder} · ${j.kind}${j.via === "schedule" ? " (scheduled)" : ""} · ${j.state} · ${legs || "no leg left"} · ${t.transfers} files, ${t.bytes} B in ${t.seconds}s · ${j.started_at}`;
+        });
+        emit(ctx, lines.length ? lines.join("\n") : "(no jobs recorded)", r);
+      } catch (err) {
+        handle(ctx, err);
+      }
+    });
+
+  program
     .command("windows")
     .description("List sync windows (open and recent) for scheduled/manual members")
     .option("--limit <n>", "How many to list", "20")

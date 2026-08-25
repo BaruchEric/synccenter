@@ -82,6 +82,27 @@ Where to look afterwards: **Logs** shows each step as it happens (window
 opened, cloud leg queued, bisync started, bisync done), **History** shows the
 finished rows with their numbers.
 
+### Every leg is one job
+
+Each press is recorded as a **job** (`GET /jobs`, History → Jobs in the
+dashboard, `sc jobs` on the CLI). The job owns its windows and its bisync
+runs (`job_id` on both), and settles from them once nothing is running and
+the cloud leg is no longer queued:
+
+| Job state | Meaning |
+|---|---|
+| `done` | every leg finished clean |
+| `stopped` | a leg was closed by hand and nothing else went wrong (the cloud leg is skipped, so it does not count against the job) |
+| `partial` | some legs finished clean, some did not: a window that hit its cap and then a bisync that ran, or a window that closed clean and a bisync that could not start |
+| `failed` | no leg finished clean, or no leg ever left |
+
+A scheduled window and a Cloud only bisync are one-leg jobs of the same
+shape. The job page (`/app/history/jobs/<id>`) draws the route station to
+station, lists the legs with their numbers, and sums them; `POST /jobs/:id/stop`
+closes whatever is still open. A restart closes any job that was waiting
+on its cloud leg (the wait lives in memory) and marks that leg as never
+started.
+
 ## Deploy order
 
 The `sync:` block is schema-validated. An API built before this feature

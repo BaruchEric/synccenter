@@ -25,6 +25,8 @@ export interface RunRow {
   dry_run: number;
   resync: number;
   misses: number;
+  /** The job this run is a leg of; null on rows from before jobs existed. */
+  job_id: number | null;
 }
 
 /**
@@ -70,12 +72,14 @@ export interface StartRunInput {
   source: RunRow["source"];
   dryRun?: boolean;
   resync?: boolean;
+  /** The job this run belongs to. */
+  jobId?: number | null;
 }
 
 export function startRun(db: Db, input: StartRunInput): RunRow {
   const { lastInsertRowid } = db.run(
-    `INSERT INTO runs (folder, member, jobid, stats_group, started_at, state, actor, source, dry_run, resync)
-     VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
+    `INSERT INTO runs (folder, member, jobid, stats_group, started_at, state, actor, source, dry_run, resync, job_id)
+     VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)`,
     [
       input.folder,
       input.member ?? null,
@@ -86,6 +90,7 @@ export function startRun(db: Db, input: StartRunInput): RunRow {
       input.source,
       input.dryRun ? 1 : 0,
       input.resync ? 1 : 0,
+      input.jobId ?? null,
     ],
   );
   return getRun(db, Number(lastInsertRowid))!;
@@ -121,6 +126,14 @@ export function listRuns(db: Db, limitOrOpts: number | ListOpts = 50): RunRow[] 
 
 export function listActiveRuns(db: Db): RunRow[] {
   return db.query("SELECT * FROM runs WHERE state = 'running' ORDER BY id ASC").all() as RunRow[];
+}
+
+/** Every run that is a leg of one of these jobs, oldest first. */
+export function listRunsForJobs(db: Db, jobIds: number[]): RunRow[] {
+  if (jobIds.length === 0) return [];
+  return db
+    .query(`SELECT * FROM runs WHERE job_id IN (${jobIds.map(() => "?").join(",")}) ORDER BY id ASC`)
+    .all(...jobIds) as RunRow[];
 }
 
 /** Live counters from an rclone stats poll. */

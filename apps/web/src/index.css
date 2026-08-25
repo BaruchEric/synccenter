@@ -39,12 +39,28 @@
     animation: sc-scan 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   }
 
+  /* The same travelling segment, lying down: the route tracks on a job page
+     run left to right, station to station. */
+  @keyframes sc-scan-x {
+    0% {
+      transform: translateX(-120%);
+    }
+    100% {
+      transform: translateX(520%);
+    }
+  }
+  .sc-scan-x {
+    animation: sc-scan-x 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .sc-pulse,
-    .sc-scan {
+    .sc-scan,
+    .sc-scan-x {
       animation: none;
     }
-    .sc-scan {
+    .sc-scan,
+    .sc-scan-x {
       opacity: 0.45;
     }
   }

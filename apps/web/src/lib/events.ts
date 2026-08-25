@@ -1,5 +1,5 @@
 import { getToken } from "@/lib/auth";
-import type { LogLine, RunView, WindowView } from "@/lib/api";
+import type { JobView, LogLine, RunView, WindowView } from "@/lib/api";
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 
@@ -7,6 +7,7 @@ export type ScEvent =
   | { type: "hello"; runs: RunView[]; windows?: WindowView[]; at: string }
   | { type: "run"; run: RunView }
   | { type: "window"; window: WindowView }
+  | { type: "job"; job: JobView }
   | { type: "folder"; folder: string; action: string }
   | { type: "log"; line: LogLine };
 
