@@ -388,6 +388,7 @@ function Leg({ name, q, rclone }: { name: string; q?: StateQuery; rclone: Set<st
         <FolderActions
           name={name}
           manifest={manifest.data}
+          rclone={rclone}
           hasCloudMember={hasCloud}
           paused={paused}
         />

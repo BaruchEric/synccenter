@@ -140,10 +140,17 @@ export function connectLive({ onEvent, onStatus }: LiveOptions): () => void {
     const until = Date.now() + POLL_BEFORE_RETRY_MS;
     while (!closed && Date.now() < until) {
       try {
-        const res = await fetch(`${BASE}/runs?limit=25`, { headers: auth(), signal: ctrl.signal });
-        if (res.ok) {
-          const body = (await res.json()) as { runs: RunView[] };
-          onEvent({ type: "hello", runs: body.runs, at: new Date().toISOString() });
+        // Both lists, the way the stream's own hello frame carries them: a
+        // window that closes while we are polling has to reach the page, or
+        // its stale running copy shadows the settled row everywhere it shows.
+        const [runsRes, windowsRes] = await Promise.all([
+          fetch(`${BASE}/runs?limit=25`, { headers: auth(), signal: ctrl.signal }),
+          fetch(`${BASE}/windows?limit=25`, { headers: auth(), signal: ctrl.signal }),
+        ]);
+        if (runsRes.ok && windowsRes.ok) {
+          const runs = ((await runsRes.json()) as { runs: RunView[] }).runs;
+          const windows = ((await windowsRes.json()) as { windows: WindowView[] }).windows;
+          onEvent({ type: "hello", runs, windows, at: new Date().toISOString() });
           onStatus("polling");
         } else {
           onStatus("offline");

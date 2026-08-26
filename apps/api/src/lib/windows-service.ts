@@ -196,12 +196,15 @@ export function finishWindow(
   state: "done" | "failed" | "timeout" | "stopped",
   error?: string | null,
 ): WindowRow | null {
-  db.run(
+  const { changes } = db.run(
     `UPDATE sync_windows SET state = ?, finished_at = ?, error = ?
      WHERE id = ? AND state = 'running'`,
     [state, new Date().toISOString(), error ?? null, id],
   );
-  return getWindow(db, id);
+  // Null when this call did not do the finishing: a stop and a poll can reach
+  // the same row, and the loser must not re-close it — the caller re-pauses
+  // the folder, writes the ledger row and picks its wording from `state`.
+  return changes === 0 ? null : getWindow(db, id);
 }
 
 /**

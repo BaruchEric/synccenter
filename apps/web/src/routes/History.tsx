@@ -17,7 +17,9 @@ import {
   type WindowView,
 } from "@/lib/api";
 import { relative } from "@/lib/cron";
-import { bytes, duration } from "@/lib/format";
+import { Select } from "@/components/Select";
+import { bytes, duration, took } from "@/lib/format";
+import { JOB_KIND_LABEL } from "@/lib/jobs";
 import { Tag } from "@/components/Tag";
 
 /**
@@ -66,7 +68,11 @@ export function History() {
             <button
               key={v.key}
               type="button"
-              onClick={() => set({ view: v.key === "ledger" ? "" : v.key })}
+              // Folder is the one filter every record shares. `kind`, `state`
+              // and `result` are each view's own vocabulary — the ledger's
+              // sync-window is the jobs list's window — so carrying them over
+              // leaves a URL claiming a filter the page below is not applying.
+              onClick={() => set({ view: v.key === "ledger" ? "" : v.key, kind: "", state: "", result: "" })}
               aria-current={view === v.key ? "page" : undefined}
               className={`rounded border px-2 py-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
                 view === v.key
@@ -187,12 +193,6 @@ const RESULT_TONE: Record<string, string> = {
   stopped: "text-dry",
   running: "text-run",
   partial: "text-signal",
-};
-
-const JOB_KIND_LABEL: Record<JobKind, string> = {
-  sync: "full sync",
-  bisync: "bisync",
-  window: "sync window",
 };
 
 const KIND_LABEL: Record<HistoryKind, string> = {
@@ -548,11 +548,6 @@ function When({ at, now }: { at: Date; now: Date }) {
   );
 }
 
-function took(from: string, to: string | null, now: Date): string {
-  const end = to ? new Date(to) : now;
-  return duration((end.getTime() - new Date(from).getTime()) / 1000);
-}
-
 interface PagedState {
   isLoading: boolean;
   isError: boolean;
@@ -625,31 +620,3 @@ function Table({
   );
 }
 
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: Array<[string, string]>;
-}) {
-  return (
-    <label className="flex items-center gap-1.5 text-dim">
-      <span className="text-[11px] uppercase tracking-wider">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-rule bg-ink px-2 py-1 font-mono text-xs text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
-      >
-        {options.map(([v, l]) => (
-          <option key={v || "-"} value={v}>
-            {l}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}

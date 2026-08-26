@@ -2,13 +2,16 @@ import { Router } from "express";
 import { RcloneClient, RcloneError } from "@synccenter/adapters";
 import type { Db } from "../db.ts";
 import type { EventBus } from "../lib/bus.ts";
+import { nextBefore, pageParams } from "../lib/paging.ts";
 import {
   getJob,
   listActiveJobs,
   listJobs,
   noteJob,
+  parseIds,
   setCloudPending,
   settleAndAnnounce,
+  stopJob,
   toJobView,
   toJobViews,
   type JobKind,
@@ -26,14 +29,12 @@ export function jobsRouter(db: Db, bus: EventBus, engine: SyncWindowEngine, rclo
 
   /** Jobs newest first, each with its legs and totals. Same cursor as /runs. */
   r.get("/jobs", (req, res) => {
-    const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 50) || 50));
-    const before = Number(req.query.before);
+    const page = pageParams(req.query, { max: 200, fallback: 50 });
     const folder = typeof req.query.folder === "string" ? req.query.folder : undefined;
     const kind = typeof req.query.kind === "string" && isKind(req.query.kind) ? req.query.kind : undefined;
     const state = typeof req.query.state === "string" && isState(req.query.state) ? req.query.state : undefined;
     const rows = listJobs(db, {
-      limit,
-      ...(Number.isInteger(before) && before > 0 ? { before } : {}),
+      ...page,
       ...(folder ? { folder } : {}),
       ...(kind ? { kind } : {}),
       ...(state ? { state } : {}),
@@ -41,7 +42,7 @@ export function jobsRouter(db: Db, bus: EventBus, engine: SyncWindowEngine, rclo
     res.json({
       jobs: toJobViews(db, rows),
       activeCount: listActiveJobs(db).length,
-      nextBefore: rows.length === limit ? rows[rows.length - 1]!.id : null,
+      nextBefore: nextBefore(rows, page.limit),
     });
   });
 
@@ -90,7 +91,16 @@ export function jobsRouter(db: Db, bus: EventBus, engine: SyncWindowEngine, rclo
       const stopped = finishRun(db, run.id, "stopped", "stopped from the dashboard");
       if (stopped) bus.emit({ type: "run", run: toView(stopped) });
     }
-    const settled = settleAndAnnounce(db, bus, row.id) ?? row;
+    let settled = settleAndAnnounce(db, bus, row.id) ?? row;
+    if (settled.state === "running") {
+      // What is left running is a window this job only rides on: the job that
+      // opened it decides when it closes. Everything this job could stop is
+      // stopped, so say the job is stopped rather than report a successful
+      // stop on a job that stays running — and the queued cloud leg reads the
+      // job's state before it fires, so it will not run behind the operator.
+      const riding = parseIds(settled.after);
+      settled = stopJob(db, bus, row.id, `stopped from the dashboard while riding window${riding.length > 1 ? "s" : ""} #${riding.join(", #")}`) ?? settled;
+    }
     res.json({ job: toJobView(db, settled), ...(problems.length > 0 ? { problems } : {}) });
   });
 

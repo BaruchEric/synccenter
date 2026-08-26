@@ -181,12 +181,15 @@ export function finishRun(
   state: "done" | "failed" | "stopped",
   error?: string | null,
 ): RunRow | null {
-  db.run(
+  const { changes } = db.run(
     `UPDATE runs SET state = ?, finished_at = ?, error = ?, speed = 0, eta = NULL, current = NULL
      WHERE id = ? AND state = 'running'`,
     [state, new Date().toISOString(), error ?? null, id],
   );
-  return getRun(db, id);
+  // Null when this call did not do the finishing — see finishWindow. A stop
+  // route and the tracker's poll race for the same row, and only the winner
+  // may write the ledger entry and announce it.
+  return changes === 0 ? null : getRun(db, id);
 }
 
 /**

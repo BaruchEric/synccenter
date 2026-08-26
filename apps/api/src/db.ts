@@ -127,6 +127,7 @@ const SCHEMA = [
      cloud TEXT NOT NULL DEFAULT '[]',
      after TEXT NOT NULL DEFAULT '[]',
      cloud_pending INTEGER NOT NULL DEFAULT 0,
+     opening INTEGER NOT NULL DEFAULT 0,
      legs_failed INTEGER NOT NULL DEFAULT 0,
      note TEXT,
      actor TEXT NOT NULL,
@@ -146,6 +147,7 @@ const SCHEMA = [
 const COLUMNS: Array<[table: string, column: string, ddl: string]> = [
   ["runs", "job_id", "INTEGER"],
   ["sync_windows", "job_id", "INTEGER"],
+  ["jobs", "opening", "INTEGER NOT NULL DEFAULT 0"],
 ];
 const COLUMN_INDEXES = [
   `CREATE INDEX IF NOT EXISTS runs_job ON runs (job_id)`,

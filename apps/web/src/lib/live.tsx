@@ -53,8 +53,8 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     const onEvent = (e: ScEvent) => {
       if (e.type === "hello") {
         setRuns(e.runs.slice(0, KEEP));
-        // The polling fallback replays hello frames without windows; keeping
-        // the last known list beats blanking an open window's band.
+        // Both the stream's hello and the polling fallback's carry windows;
+        // the guard is for a frame from an older server that does not.
         if (e.windows) setWindows(e.windows.slice(0, KEEP));
         return;
       }

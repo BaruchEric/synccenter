@@ -40,6 +40,7 @@ export interface JobRow {
   cloud: string;
   after: string;
   cloud_pending: number;
+  opening: number;
   legs_failed: number;
   note: string | null;
   actor: string;
@@ -181,6 +182,16 @@ export function setCloudPending(db: Db, id: number, pending: boolean): void {
   db.run("UPDATE jobs SET cloud_pending = ? WHERE id = ? AND state = 'running'", [pending ? 1 : 0, id]);
 }
 
+/**
+ * Hold the job open while its legs are still being started. Opening a window
+ * can also close it (a resume that fails closes the row from inside open), and
+ * that close settles the job — while the loop is still about to open the next
+ * host under the same id. Held, the job waits for the whole set.
+ */
+export function setJobOpening(db: Db, id: number, opening: boolean): void {
+  db.run("UPDATE jobs SET opening = ? WHERE id = ? AND state = 'running'", [opening ? 1 : 0, id]);
+}
+
 /** Append to the job's note; notes join with a middle dot. */
 export function noteJob(db: Db, id: number, note: string): void {
   db.run("UPDATE jobs SET note = CASE WHEN note IS NULL OR note = '' THEN ? ELSE note || ' · ' || ? END WHERE id = ?", [
@@ -205,7 +216,7 @@ export function settleJob(db: Db, id: number): { job: JobRow; changed: boolean }
   const job = getJob(db, id);
   if (!job) return null;
   if (job.state !== "running") return { job, changed: false };
-  if (job.cloud_pending === 1) return { job, changed: false };
+  if (job.cloud_pending === 1 || job.opening === 1) return { job, changed: false };
 
   const windows = listWindowsForJobs(db, [id], parseIds(job.after));
   const runs = listRunsForJobs(db, [id]);
@@ -218,6 +229,38 @@ export function settleJob(db: Db, id: number): { job: JobRow; changed: boolean }
   const finishedAt = ends.length > 0 ? ends.sort()[ends.length - 1]! : new Date().toISOString();
   db.run("UPDATE jobs SET state = ?, finished_at = ? WHERE id = ? AND state = 'running'", [state, finishedAt, id]);
   return { job: getJob(db, id)!, changed: true };
+}
+
+/**
+ * Settle every running job a window counts as a leg of: the job that opened
+ * it, and any job that adopted it. A press onto an already-open window rides
+ * a row it does not own and records it in `after`, so going by the window's
+ * own `job_id` would leave the adopter running until the next boot.
+ */
+export function settleWindowJobs(db: Db, bus: EventBus, windowId: number, ownerJobId: number | null): void {
+  const ids = new Set<number>(ownerJobId == null ? [] : [ownerJobId]);
+  for (const job of listActiveJobs(db)) {
+    if (parseIds(job.after).includes(windowId)) ids.add(job.id);
+  }
+  for (const id of ids) settleAndAnnounce(db, bus, id);
+}
+
+/**
+ * Close a running job as stopped because the operator said so, whatever its
+ * legs are doing. settleJob cannot do this: a job whose only running leg is a
+ * window another job opened stays running until that window closes, and the
+ * stop route has no way to close a row it does not own.
+ */
+export function stopJob(db: Db, bus: EventBus, id: number, note: string): JobRow | null {
+  const { changes } = db.run("UPDATE jobs SET state = 'stopped', finished_at = ?, cloud_pending = 0 WHERE id = ? AND state = 'running'", [
+    new Date().toISOString(),
+    id,
+  ]);
+  if (changes === 0) return getJob(db, id);
+  noteJob(db, id, note);
+  const row = getJob(db, id);
+  if (row) bus.emit({ type: "job", job: toJobView(db, row) });
+  return row;
 }
 
 /** Settle, and tell the bus if the job closed. One line at every leg's end. */
@@ -251,6 +294,9 @@ function stateOf(windows: WindowRow[], runs: RunRow[], legsFailed: number): JobS
 export function abandonStaleJobs(db: Db): number {
   let n = 0;
   for (const job of listActiveJobs(db)) {
+    // A job held open mid-open: the process died between two window opens,
+    // so no further leg is coming and the hold has nothing left to protect.
+    if (job.opening === 1) setJobOpening(db, job.id, false);
     if (job.cloud_pending === 1) {
       noteJob(db, job.id, "cloud leg never started — SyncCenter restarted while the windows were open");
       db.run("UPDATE jobs SET cloud_pending = 0, legs_failed = legs_failed + ? WHERE id = ?", [
@@ -339,7 +385,8 @@ function sum<T>(items: T[], pick: (t: T) => number): number {
 }
 
 /** The JSON arrays on the row are written by this module; anything else reads as empty. */
-function parseIds(json: string): number[] {
+/** The window ids in a job's `after`, the legs it rides but did not open. */
+export function parseIds(json: string): number[] {
   const v = parseJson(json);
   return Array.isArray(v) ? v.filter((x): x is number => typeof x === "number") : [];
 }

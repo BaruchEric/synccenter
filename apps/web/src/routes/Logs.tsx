@@ -12,6 +12,7 @@ import {
   type LogSource,
 } from "@/lib/api";
 import { LiveLamp } from "@/components/LiveLamp";
+import { Select } from "@/components/Select";
 import { Tag } from "@/components/Tag";
 import { useRcloneHosts } from "@/lib/hosts";
 import { useLive } from "@/lib/live";
@@ -81,6 +82,20 @@ export function Logs() {
     );
     return [...live, ...fetched];
   }, [pages.data, logLines, level, source, folder, debouncedQ]);
+
+  // The live ring holds a fixed number of lines, unfiltered. Once it has
+  // dropped one that the snapshot never saw, the ids between them are in
+  // neither list and "Load older" pages below the hole, so the page quietly
+  // stops being the log. Compare the raw ring against the snapshot — the
+  // filtered view skips ids by design and would refetch forever. A fresh
+  // snapshot closes the hole.
+  const oldestLive = logLines[logLines.length - 1]?.id;
+  const newestFetched = pages.data?.pages[0]?.lines[0]?.id;
+  const gapped = oldestLive !== undefined && newestFetched !== undefined && oldestLive > newestFetched + 1;
+  const { refetch } = pages;
+  useEffect(() => {
+    if (gapped) void refetch();
+  }, [gapped, refetch]);
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -377,41 +392,21 @@ function SyncthingPanel({ folders, folder }: { folders: string[]; folder: string
 }
 
 /**
- * Syncthing's log level is an integer (slog-style, larger is louder); the
- * message text is the more reliable tell on daemons that omit it.
+ * Syncthing 2.x labels each line with the code it prints — INF, WRN, ERR,
+ * FTL — so that is what we colour by. The message text is only the fallback,
+ * for a daemon that sends no level: it reads the structured fields too, and
+ * an ordinary INF line about a lost connection carries `error=` in them.
  */
-function syncthingTone(level: number | undefined, message: string): string {
+function syncthingTone(level: string | undefined, message: string): string {
+  const code = level?.trim().toUpperCase();
+  if (code) {
+    if (code.startsWith("ERR") || code.startsWith("FTL") || code.startsWith("CRIT")) return "text-fail";
+    if (code.startsWith("WRN") || code.startsWith("WARN")) return "text-signal";
+    return "text-slate-300";
+  }
   const text = message.toLowerCase();
-  if ((level !== undefined && level >= 3) || text.includes("failed") || text.includes("error")) return "text-fail";
-  if ((level !== undefined && level >= 2) || text.includes("warn")) return "text-signal";
+  if (text.includes("failed") || text.includes("error")) return "text-fail";
+  if (text.includes("warn")) return "text-signal";
   return "text-slate-300";
 }
 
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: Array<[string, string]>;
-}) {
-  return (
-    <label className="flex items-center gap-1.5 text-dim">
-      {label && <span className="text-[11px] uppercase tracking-wider">{label}</span>}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-rule bg-ink px-2 py-1 font-mono text-xs text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-signal"
-      >
-        {options.map(([v, l]) => (
-          <option key={v || "-"} value={v}>
-            {l}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}

@@ -5,7 +5,7 @@ import type { Db } from "../db.ts";
 import type { HostRegistry } from "../registry.ts";
 import type { EventBus } from "./bus.ts";
 import { listYamlNames } from "./fs.ts";
-import { settleAndAnnounce, startJob } from "./jobs-service.ts";
+import { settleWindowJobs, startJob } from "./jobs-service.ts";
 import { errorText, type Log } from "./log.ts";
 import { firesBetween } from "./cron-times.ts";
 import {
@@ -470,7 +470,9 @@ export class SyncWindowEngine {
     this.bus.emit({ type: "folder", folder: row.folder, action: "paused" });
     // After the window event, so a chain waiting on this window (Sync now)
     // has queued its cloud leg before the job is asked whether it is over.
-    settleAndAnnounce(this.db, this.bus, row.job_id);
+    // Every job this window was a leg of, not just the one that opened it:
+    // a press onto an open window rides a row it does not own.
+    settleWindowJobs(this.db, this.bus, row.id, row.job_id);
   }
 
   private announce(row: WindowRow): void {

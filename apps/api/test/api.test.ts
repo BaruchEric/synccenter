@@ -1315,6 +1315,34 @@ describe("GET /jobs — every leg under one id", () => {
     expect((await call("/jobs/999999")).status).toBe(404);
   });
 
+  it("stopping a job that only rides someone else's window closes it and drops the bisync", async () => {
+    // Press one owns the window; press two adopts it and carries the cloud leg.
+    const owner = (await (await call("/folders/held-cloud/sync?cloud=false", { method: "POST" })).json()) as {
+      job: { id: number };
+      windows: Array<{ id: number }>;
+    };
+    const rider = (await (await call("/folders/held-cloud/sync", { method: "POST" })).json()) as {
+      job: { id: number; after: number[] };
+    };
+    expect(rider.job.after).toEqual([owner.windows[0]!.id]);
+
+    const { job } = (await (await call(`/jobs/${rider.job.id}/stop`, { method: "POST" })).json()) as {
+      job: { state: string; cloudPending: boolean; note: string };
+    };
+    // The window belongs to the other job, so the stop cannot close it — but
+    // it must not leave this job running for nobody to settle.
+    expect(job.state).toBe("stopped");
+    expect(job.cloudPending).toBe(false);
+    expect(job.note).toContain("riding window");
+    // The window it was riding is untouched: a job the operator did not stop.
+    const w = (await (await call(`/windows/${owner.windows[0]!.id}`)).json()) as { window: { state: string } };
+    expect(w.window.state).toBe("running");
+
+    // That the bisync does not fire when the window later closes is driven by
+    // the clock, so it lives in sync-now.test.ts ("a stopped job does not run
+    // its cloud leg when the window it was riding closes").
+  });
+
   it("a bisync started on its own and a window on its own are jobs too", async () => {
     rcloneFake.nextJobStatus = { finished: false };
     const b = (await (await call("/folders/shared/bisync?async=true", { method: "POST" })).json()) as { runId: number };

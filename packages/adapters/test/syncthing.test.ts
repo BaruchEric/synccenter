@@ -253,11 +253,13 @@ describe("error handling", () => {
 describe("SyncthingClient log and folder errors", () => {
   it("getSystemLog reads /rest/system/log, with an optional since", async () => {
     const { client: c, calls } = client({
-      body: { messages: [{ when: "2026-08-25T10:00:00Z", message: "Ready to synchronize", level: 0 }] },
+      // The shape a 2.x daemon sends: the level is its printed code.
+      body: { messages: [{ when: "2026-08-25T10:00:00Z", message: "Ready to synchronize", level: "INF" }] },
     });
     const log = await c.getSystemLog();
     expect(calls[0]!.url).toBe("http://st.local:8384/rest/system/log");
     expect(log.messages[0]!.message).toBe("Ready to synchronize");
+    expect(log.messages[0]!.level).toBe("INF");
     await c.getSystemLog("2026-08-25T09:00:00Z");
     expect(calls[1]!.url).toBe("http://st.local:8384/rest/system/log?since=2026-08-25T09%3A00%3A00Z");
   });

@@ -254,7 +254,8 @@ export interface LogList {
 /** A Syncthing daemon's own log ring (GET /hosts/:name/log). */
 export interface HostLog {
   host: string;
-  messages: Array<{ when: string; message: string; level?: number }>;
+  /** `level` is Syncthing's own code — "INF", "WRN", "ERR" — or absent. */
+  messages: Array<{ when: string; message: string; level?: string }>;
 }
 /** What each member cannot pull for a folder (GET /folders/:name/errors). */
 export interface FolderErrors {
@@ -277,10 +278,14 @@ export interface FolderManifest {
 
 /**
  * Members that sync in windows rather than continuously — the ones "Sync now"
- * applies to. Mirrors the server's effectiveSync (override wins over folder).
+ * applies to. Mirrors the server's rule (sync-now.ts): the member override
+ * wins over the folder-level block, and a cloud member is never held. A
+ * folder-level `sync: { mode: scheduled }` reaches the rclone member too, and
+ * without `rclone` this would promise it a window it can never get.
  */
-export function heldMembers(m: FolderManifest): string[] {
+export function heldMembers(m: FolderManifest, rclone: Set<string>): string[] {
   return Object.keys(m.paths).filter((host) => {
+    if (rclone.has(host)) return false;
     const mode = m.overrides?.[host]?.sync?.mode ?? m.sync?.mode ?? "realtime";
     return mode !== "realtime";
   });

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { RcloneClient, RcloneError } from "@synccenter/adapters";
 import type { Db } from "../db.ts";
 import type { EventBus } from "../lib/bus.ts";
+import { nextBefore, pageParams } from "../lib/paging.ts";
 import { settleAndAnnounce } from "../lib/jobs-service.ts";
 import { finishRun, getRun, listActiveRuns, listRuns, toView } from "../lib/runs-service.ts";
 
@@ -9,19 +10,13 @@ export function runsRouter(db: Db, bus: EventBus, rclone: RcloneClient | null): 
   const r = Router();
 
   r.get("/runs", (req, res) => {
-    const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 50) || 50));
-    const before = Number(req.query.before);
+    const page = pageParams(req.query, { max: 200, fallback: 50 });
     const folder = typeof req.query.folder === "string" ? req.query.folder : undefined;
-    const rows = listRuns(db, {
-      limit,
-      ...(Number.isInteger(before) && before > 0 ? { before } : {}),
-      ...(folder ? { folder } : {}),
-    });
+    const rows = listRuns(db, { ...page, ...(folder ? { folder } : {}) });
     res.json({
       runs: rows.map(toView),
       activeCount: listActiveRuns(db).length,
-      // Cursor for the next page; null once the page came back short.
-      nextBefore: rows.length === limit ? rows[rows.length - 1]!.id : null,
+      nextBefore: nextBefore(rows, page.limit),
     });
   });
 

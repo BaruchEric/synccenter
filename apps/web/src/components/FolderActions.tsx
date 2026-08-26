@@ -16,11 +16,14 @@ import { api, heldMembers, type FolderManifest, type SyncNowResult } from "@/lib
 export function FolderActions({
   name,
   manifest,
+  rclone,
   hasCloudMember,
   paused,
 }: {
   name: string;
   manifest?: FolderManifest;
+  /** The rclone hosts, so a cloud member is not mistaken for a held one. */
+  rclone: Set<string>;
   hasCloudMember?: boolean;
   paused?: boolean;
 }) {
@@ -29,7 +32,7 @@ export function FolderActions({
   const [note, setNote] = useState<Note | null>(null);
 
   const disabled = manifest?.enabled === false;
-  const held = manifest ? heldMembers(manifest) : [];
+  const held = manifest ? heldMembers(manifest, rclone) : [];
   const canSync = held.length > 0 || hasCloudMember === true;
 
   const refresh = () => {

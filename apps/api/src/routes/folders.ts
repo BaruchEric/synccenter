@@ -138,7 +138,22 @@ export function foldersRouter(
       });
       const somethingHappened =
         out.windows.length > 0 || out.cloud?.status === "queued" || (out.cloud?.status === "started" && out.cloud.runs.length > 0);
-      res.status(somethingHappened ? 200 : 500).json(out);
+      if (somethingHappened) {
+        res.json(out);
+        return;
+      }
+      // Nothing started. The clients read `error` and nothing else on a
+      // non-2xx, so the reasons have to be there too, or the operator gets
+      // "500 Internal Server Error" for a folder whose filters were never
+      // compiled. The full result stays in the body for anyone who wants it.
+      const why = [
+        ...out.failed.map((f) => `${f.host}: ${f.error}`),
+        ...(out.cloud?.status === "started" ? out.cloud.errors.map((e) => `${e.member}: ${e.error}`) : []),
+      ];
+      res.status(500).json({
+        error: `sync now started nothing for ${out.folder} (job #${out.job.id})${why.length > 0 ? `: ${why.join("; ")}` : ""}`,
+        ...out,
+      });
     } catch (err) {
       if (err instanceof SyncNowError) {
         res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });

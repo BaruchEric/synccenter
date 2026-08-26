@@ -9,11 +9,11 @@ import { BisyncStartError, type BisyncStarted, type StartBisyncOpts } from "../s
 import { EventBus } from "../src/lib/bus.ts";
 import { Log, type LogLine } from "../src/lib/log.ts";
 import { HostRegistry } from "../src/registry.ts";
-import { abandonStaleJobs, getJob, settleJob, startJob, toJobView } from "../src/lib/jobs-service.ts";
+import { abandonStaleJobs, getJob, settleJob, startJob, stopJob, toJobView } from "../src/lib/jobs-service.ts";
 import { finishRun, getRun, listRunsForJobs, startRun, toView } from "../src/lib/runs-service.ts";
 import { SyncNow, SyncNowError } from "../src/lib/sync-now.ts";
 import { SyncWindowEngine } from "../src/lib/sync-windows.ts";
-import { finishWindow, getWindow, startWindow } from "../src/lib/windows-service.ts";
+import { activeWindowFor, finishWindow, getWindow, startWindow } from "../src/lib/windows-service.ts";
 import { FakeDaemon } from "./helpers/fake-daemon.ts";
 
 const TOKEN = "test-token-of-sufficient-length-1234567890";
@@ -61,6 +61,38 @@ beforeAll(() => {
       "      mode: scheduled",
       '      schedule: "0 * * * *"',
       "      max_window_minutes: 45",
+    ].join("\n"),
+  );
+  // Two members that both sync in windows, and no cloud member: a press here
+  // opens two windows under one job and has no bisync to wait for.
+  writeFileSync(
+    join(configDir, "folders", "two-held.yaml"),
+    [
+      "name: two-held",
+      "ruleset: base-binaries",
+      "type: send-receive",
+      "paths:",
+      "  mac-studio: /Users/eric/Sync/two-held",
+      "  qnap-ts453d: /share/Sync/two-held",
+      "sync:",
+      "  mode: manual",
+    ].join("\n"),
+  );
+  // The same two held members, with Drive behind them: the bisync has to wait
+  // for BOTH windows, however many presses opened them.
+  writeFileSync(
+    join(configDir, "folders", "two-held-cloud.yaml"),
+    [
+      "name: two-held-cloud",
+      "ruleset: base-binaries",
+      "type: send-receive",
+      "paths:",
+      "  mac-studio: /Users/eric/Sync/two-held-cloud",
+      "  qnap-ts453d: /share/Sync/two-held-cloud",
+      "  gdrive: sync/two-held-cloud",
+      'bisync: { schedule: "0 4 * * *" }',
+      "sync:",
+      "  mode: manual",
     ].join("\n"),
   );
   // Everything realtime, plus Drive: nothing to wait for before the bisync.
@@ -492,6 +524,145 @@ describe("jobs — every leg under one id", () => {
     // Window done, run running.
     expect(settleJob(db, out.job.id)!.changed).toBe(false);
     expect(getJob(db, out.job.id)!.state).toBe("running");
+  });
+
+  it("settles the job that only rode a window it did not open", async () => {
+    // Press one opens the window and owns it; press two rides it. With no
+    // cloud leg, the rider's only leg is a row belonging to someone else.
+    const first = await syncNow.run("cloudy", { ...who, cloud: false });
+    const second = await syncNow.run("cloudy", { ...who, cloud: false });
+    const w = first.windows[0]!.id;
+    expect(second.windows[0]!.id).toBe(w);
+    expect(job(second.job.id).after).toEqual([w]);
+
+    await settle();
+    expect(getWindow(db, w)!.state).toBe("done");
+    // The window's own job and the one that adopted it both close.
+    expect(getJob(db, first.job.id)!.state).toBe("done");
+    expect(getJob(db, second.job.id)!.state).toBe("done");
+    expect(getJob(db, second.job.id)!.finished_at).not.toBeNull();
+  });
+
+  it("keeps the job open while the rest of its windows are still opening", async () => {
+    // The first host cannot be resumed, which closes its window from inside
+    // open() — while the loop is still about to open the second host.
+    mac.failResume = new Error("connection refused");
+    const out = await syncNow.run("two-held", { ...who, cloud: false });
+    expect(out.windows.map((w) => w.state)).toEqual(["failed", "running"]);
+    // Not closed on the strength of the failed leg alone.
+    expect(getJob(db, out.job.id)!.state).toBe("running");
+    expect(out.job.state).toBe("running");
+
+    await settle();
+    expect(getWindow(db, out.windows[1]!.id)!.state).toBe("done");
+    const settled = getJob(db, out.job.id)!;
+    expect(settled.state).toBe("partial");
+    // The job ends with its last leg, not before its second one started.
+    expect(settled.finished_at).toBe(getWindow(db, out.windows[1]!.id)!.finished_at);
+  });
+
+  it("two presses that overlap the resume round trip still run one bisync", async () => {
+    // Press one inserts the window row, then waits inside resumeFolder; press
+    // two arrives in that gap, sees the row, and adopts it.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const realResume = qnap.resumeFolder.bind(qnap);
+    qnap.resumeFolder = async (id: string) => {
+      qnap.resumeFolder = realResume;
+      await gate;
+      await realResume(id);
+    };
+    const p1 = syncNow.run("cloudy", who);
+    const p2 = syncNow.run("cloudy", who);
+    release();
+    const [first, second] = await Promise.all([p1, p2]);
+
+    const w = first.windows[0]!.id;
+    expect(second.windows[0]!.id).toBe(w);
+    expect(syncNow.queuedAfter("cloudy")).toEqual([w]);
+
+    await settle();
+    // One window closing must not start the same bisync under two jobs.
+    expect(bisyncCalls).toHaveLength(1);
+    expect(listRunsForJobs(db, [first.job.id, second.job.id])).toHaveLength(1);
+    expect(getJob(db, first.job.id)!.state).not.toBe("running");
+  });
+
+  it("a stopped job does not run its cloud leg when the window it was riding closes", async () => {
+    const owner = await syncNow.run("cloudy", { ...who, cloud: false });
+    const rider = await syncNow.run("cloudy", who);
+    expect(rider.job.after).toEqual([owner.windows[0]!.id]);
+    // What POST /jobs/:id/stop does to a job whose only leg is adopted.
+    stopJob(db, bus, rider.job.id, "stopped from the dashboard while riding window #1");
+    expect(getJob(db, rider.job.id)!.state).toBe("stopped");
+
+    await settle();
+    expect(getWindow(db, owner.windows[0]!.id)!.state).toBe("done");
+    // The operator stopped the press; its bisync must not run behind them.
+    expect(bisyncCalls).toEqual([]);
+    expect(getJob(db, rider.job.id)!.state).toBe("stopped");
+  });
+
+  it("a chain already queued waits for the windows a later press opens", async () => {
+    // Press one covers the Mac only, so its chain waits on that one window.
+    const first = await syncNow.run("two-held-cloud", { ...who, host: "mac-studio" });
+    expect(syncNow.queuedAfter("two-held-cloud")).toEqual([first.windows[0]!.id]);
+    // Press two adopts it and opens the NAS window; one chain, two windows.
+    const second = await syncNow.run("two-held-cloud", who);
+    const nas = second.windows.find((w) => w.host === "qnap-ts453d")!;
+    expect(syncNow.queuedAfter("two-held-cloud")).toEqual([first.windows[0]!.id, nas.id]);
+    expect(second.cloud).toEqual({
+      status: "queued",
+      members: ["gdrive"],
+      after: [first.windows[0]!.id, nas.id],
+    });
+
+    // Close the Mac window alone: the NAS has not caught up, so Drive waits.
+    qnap.state = "syncing";
+    qnap.needBytes = 4096;
+    qnap.needFiles = 2;
+    await settle();
+    expect(getWindow(db, first.windows[0]!.id)!.state).toBe("done");
+    expect(getWindow(db, nas.id)!.state).toBe("running");
+    expect(bisyncCalls).toEqual([]);
+
+    // Now the NAS catches up too, and the one bisync runs.
+    qnap.state = "idle";
+    qnap.needBytes = 0;
+    qnap.needFiles = 0;
+    await settle();
+    expect(getWindow(db, nas.id)!.state).toBe("done");
+    expect(bisyncCalls).toHaveLength(1);
+  });
+
+  it("a window stopped while its resume is still in flight is only closed once", async () => {
+    // open() inserts the row, then awaits resumeFolder. A stop in that gap
+    // closes the window; the resume then fails and tries to close it again.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    qnap.resumeFolder = async (id: string) => {
+      qnap.calls.push(`resumeFolder:${id}`);
+      await gate;
+      throw new Error("connection refused");
+    };
+    const opening = syncNow.run("cloudy", { ...who, cloud: false });
+    const w = activeWindowFor(db, "cloudy", "qnap-ts453d")!;
+    await engine.stopWindow(w.id);
+    release();
+    await opening;
+
+    expect(getWindow(db, w.id)!.state).toBe("stopped");
+    // One close, so one ledger row and no "failed" line about a stopped window.
+    const ledger = db.query("SELECT result, note FROM apply_history").all() as Array<{ result: string; note: string }>;
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.note).toContain("stopped");
+    // And no second, contradicting line calling the stopped window failed.
+    expect(lines().filter((l) => l.message.includes("could not resume"))).toEqual([]);
+    expect(lines().filter((l) => l.message.includes(`window #${w.id} on qnap-ts453d closed by hand`))).toHaveLength(1);
   });
 
   it("a restart closes a job that was waiting on its cloud leg", async () => {

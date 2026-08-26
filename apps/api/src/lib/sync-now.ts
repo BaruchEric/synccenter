@@ -11,6 +11,7 @@ import {
   noteJob,
   setCloudPending,
   setJobAfter,
+  setJobOpening,
   settleAndAnnounce,
   startJob,
   toJobView,
@@ -85,6 +86,14 @@ export interface SyncNowDeps {
   bisync: BisyncStarter;
 }
 
+/** A folder's queued cloud leg: what it waits on, whose job runs it, how to add more. */
+interface Chain {
+  ids: number[];
+  jobId: number;
+  /** Wait for these windows too, before the bisync runs. */
+  adopt(ids: number[]): void;
+}
+
 /**
  * "Sync now" for a whole folder, every leg in order.
  *
@@ -100,8 +109,8 @@ export interface SyncNowDeps {
  */
 export class SyncNow {
   private readonly deps: SyncNowDeps;
-  /** Folder → the window ids its queued cloud leg is waiting on, and whose job that is. */
-  private readonly following = new Map<string, { ids: number[]; jobId: number }>();
+  /** Folder → the one chain waiting to run its cloud leg. */
+  private readonly following = new Map<string, Chain>();
 
   constructor(deps: SyncNowDeps) {
     this.deps = deps;
@@ -147,6 +156,9 @@ export class SyncNow {
       const open = requested.map((host) => activeWindowFor(db, m.name, host));
       const riding = getJob(db, alreadyQueued.jobId);
       if (riding && open.every((w) => w !== null)) {
+        // Windows this press found open that the chain is not waiting on yet
+        // (another press opened them): the cloud leg belongs behind those too.
+        alreadyQueued.adopt(open.filter((w): w is WindowRow => w !== null).map((w) => w.id));
         return {
           folder: m.name,
           windows: open.filter((w): w is WindowRow => w !== null).map(toWindowView),
@@ -166,8 +178,13 @@ export class SyncNow {
       actor: opts.actor,
       source: opts.source,
     });
-    // The cloud leg is planned but not started: the job must not settle on
-    // the strength of a window that failed at resume before we get to it.
+    // Opening a window can also close it: a resume that fails closes the row
+    // from inside open(), and that close settles the job — while this loop is
+    // still about to open the next host under the same id. Held, the job waits
+    // for the whole set, whether or not there is a cloud leg behind it.
+    setJobOpening(db, job.id, true);
+    // The cloud leg is planned but has no row yet: the job must not settle on
+    // the strength of the windows alone.
     if (cloudMembers.length > 0) setCloudPending(db, job.id, true);
 
     const windows: WindowRow[] = [];
@@ -189,6 +206,7 @@ export class SyncNow {
         // fall through to: the caller asked for one thing and it did not happen.
         if (err instanceof SyncWindowError && requested.length === 1 && cloudMembers.length === 0) {
           failJobLeg(db, job.id, `window on ${host}: ${err.message}`);
+          setJobOpening(db, job.id, false);
           settleAndAnnounce(db, bus, job.id);
           throw new SyncNowError(err.message, windowErrorStatus(err), err.code);
         }
@@ -196,8 +214,15 @@ export class SyncNow {
         failJobLeg(db, job.id, `window on ${host}: ${errorText(err)}`);
       }
     }
+    // Every leg that is going to exist now does; from here a close may settle.
+    setJobOpening(db, job.id, false);
     // Windows this job rides on but did not open belong to the route too.
     const adopted = windows.filter((w) => w.job_id !== job.id).map((w) => w.id);
+    // Read the folder's queued chain again rather than trusting the capture
+    // from before the opens: another press can have queued the cloud leg while
+    // this one waited on resumeFolder, and two chains following the same
+    // windows would each run the bisync when they close.
+    const queued = this.following.get(m.name);
 
     let cloud: CloudLeg | null = null;
     if (cloudMembers.length > 0) {
@@ -205,11 +230,14 @@ export class SyncNow {
       setJobAfter(db, job.id, [...new Set([...adopted, ...pending])]);
       if (pending.length === 0) {
         cloud = await this.startCloudLeg(m.name, cloudMembers, opts, job.id);
-      } else if (alreadyQueued) {
+      } else if (queued) {
         // The windows we just opened are new, but another chain on this
         // folder is already waiting to run the cloud leg; it will cover us.
-        cloud = { status: "queued", members: cloudMembers, after: alreadyQueued.ids };
-        noteJob(db, job.id, `cloud leg already queued by job #${alreadyQueued.jobId}`);
+        // Ours are new windows: the queued chain has to wait for them too, or
+        // Drive is written before this press's members have caught up.
+        queued.adopt(pending);
+        cloud = { status: "queued", members: cloudMembers, after: [...queued.ids] };
+        noteJob(db, job.id, `cloud leg already queued by job #${queued.jobId}`);
         setCloudPending(db, job.id, false);
       } else {
         cloud = { status: "queued", members: cloudMembers, after: pending };
@@ -246,14 +274,12 @@ export class SyncNow {
    */
   private followWindows(folder: string, ids: number[], members: string[], opts: SyncNowOpts, jobId: number): void {
     const { db, bus, log } = this.deps;
+    // Mutated in place by adopt(), and handed out as the chain's `ids`, so
+    // queuedAfter and every result that reports `after` see the additions.
+    const waiting = [...ids];
     const pending = new Set(ids);
     let stoppedOn: string | null = null;
     let done = false;
-    // Whatever the engine does, a window ends at its cap; well past that the
-    // subscription is a leak, not a wait.
-    const capMinutes = Math.max(
-      ...ids.map((id) => getWindow(db, id)?.max_minutes ?? 60),
-    );
     let unsubscribe = () => {};
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -264,7 +290,6 @@ export class SyncNow {
       unsubscribe();
       if (timer) clearTimeout(timer);
     };
-    this.following.set(folder, { ids, jobId });
 
     const settle = (w: WindowRow) => {
       if (!pending.has(w.id) || w.state === "running") return;
@@ -283,29 +308,70 @@ export class SyncNow {
         settleAndAnnounce(db, bus, jobId);
         return;
       }
+      // The job can have ended while its windows ran — stopped from the
+      // dashboard, most of all. Starting its bisync now would undo the stop.
+      const job = getJob(db, jobId);
+      if (!job || job.state !== "running") {
+        log.warn("sync", `cloud leg skipped: job #${jobId} is ${job?.state ?? "gone"}`, {
+          folder,
+          data: { members, jobId },
+        });
+        setCloudPending(db, jobId, false);
+        return;
+      }
       void this.startCloudLeg(folder, members, opts, jobId);
     };
+
+    /**
+     * The windows end at their cap; well past that the subscription is a leak,
+     * not a wait. Re-armed when adopt() brings in a window with a longer cap,
+     * so the timer never fires on a window that is still legitimately open.
+     */
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      const capMinutes = Math.max(...waiting.map((id) => getWindow(db, id)?.max_minutes ?? 60));
+      timer = setTimeout(
+        () => {
+          if (done) return;
+          finish();
+          log.warn("sync", `cloud leg abandoned: window${pending.size > 1 ? "s" : ""} #${[...pending].join(", #")} never reported closing`, {
+            folder,
+            data: { members, after: [...waiting], jobId },
+          });
+          for (const member of members) {
+            failJobLeg(db, jobId, `bisync → ${member} abandoned: the windows never reported closing`);
+          }
+          setCloudPending(db, jobId, false);
+          settleAndAnnounce(db, bus, jobId);
+        },
+        (capMinutes + 5) * 60_000,
+      );
+      timer.unref?.();
+    };
+
+    const adopt = (more: number[]) => {
+      if (done) return;
+      const fresh = more.filter((id) => !waiting.includes(id));
+      if (fresh.length === 0) return;
+      for (const id of fresh) {
+        waiting.push(id);
+        pending.add(id);
+      }
+      arm();
+      // One of them may already have closed; the same catch-up the initial
+      // subscription does, or the chain would wait for an event never coming.
+      for (const id of fresh) {
+        const now = getWindow(db, id);
+        if (now) settle(now);
+      }
+    };
+
+    this.following.set(folder, { ids: waiting, jobId, adopt });
 
     unsubscribe = bus.subscribe((e) => {
       if (e.type === "window" && e.window.folder === folder) settle(e.window);
     });
-    timer = setTimeout(
-      () => {
-        if (done) return;
-        finish();
-        log.warn("sync", `cloud leg abandoned: window${pending.size > 1 ? "s" : ""} #${[...pending].join(", #")} never reported closing`, {
-          folder,
-          data: { members, after: ids, jobId },
-        });
-        for (const member of members) {
-          failJobLeg(db, jobId, `bisync → ${member} abandoned: the windows never reported closing`);
-        }
-        setCloudPending(db, jobId, false);
-        settleAndAnnounce(db, bus, jobId);
-      },
-      (capMinutes + 5) * 60_000,
-    );
-    timer.unref?.();
+    arm();
 
     // A window can have closed between open() returning and this subscription
     // (a resume that failed closes the row before open() even returns).

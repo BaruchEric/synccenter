@@ -12,7 +12,8 @@ import {
   type WindowView,
 } from "@/lib/api";
 import { relative } from "@/lib/cron";
-import { bytes, duration, rate } from "@/lib/format";
+import { bytes, clock, duration, isoAttr, rate, stamp, took } from "@/lib/format";
+import { JOB_KIND_LABEL, JOB_STATE_TONE } from "@/lib/jobs";
 import { useRcloneHosts } from "@/lib/hosts";
 import { useLive } from "@/lib/live";
 import { Tag } from "@/components/Tag";
@@ -144,19 +145,19 @@ export function Job() {
           >
             {job.folder}
           </Link>
-          <span className="font-mono text-sm text-slate-300">{KIND_LABEL[job.kind]}</span>
+          <span className="font-mono text-sm text-slate-300">{JOB_KIND_LABEL[job.kind]}</span>
           <span className="font-mono text-xs text-dim">
             {job.via === "schedule" ? "on schedule" : `by ${job.actor} · ${job.source}`}
           </span>
         </div>
         <p className="mt-1 font-mono text-xs tabular-nums text-dim">
-          <time dateTime={started.toISOString()} title={started.toLocaleString()}>
+          <time dateTime={isoAttr(started)} title={started.toLocaleString()}>
             {stamp(started)}
           </time>
           {finished ? (
             <>
               {" → "}
-              <time dateTime={finished.toISOString()} title={finished.toLocaleString()}>
+              <time dateTime={isoAttr(finished)} title={finished.toLocaleString()}>
                 {sameDay(started, finished) ? clock(finished) : stamp(finished)}
               </time>
             </>
@@ -269,7 +270,7 @@ export function Job() {
                 <td className="whitespace-nowrap px-3 py-2.5">{t.transfers.toLocaleString()}</td>
                 <td className="whitespace-nowrap px-3 py-2.5">{t.checks.toLocaleString()}</td>
                 <td className={`whitespace-nowrap px-3 py-2.5 ${t.errors > 0 ? "text-fail" : ""}`}>{t.errors.toLocaleString()}</td>
-                <td className={`whitespace-nowrap px-3 py-2.5 ${STATE_TONE[job.state]}`}>
+                <td className={`whitespace-nowrap px-3 py-2.5 ${JOB_STATE_TONE[job.state]}`}>
                   {job.state}
                   <span className="text-dim">
                     {" "}
@@ -334,7 +335,11 @@ export function Job() {
         </Section>
 
         <Section label="story">
-          <Story lines={story.data?.lines ?? []} loading={story.isLoading} />
+          <Story
+            lines={story.data?.lines ?? []}
+            truncated={story.data?.nextBefore != null}
+            loading={story.isLoading}
+          />
         </Section>
       </div>
     </Frame>
@@ -357,7 +362,7 @@ function Frame({ id, state, children }: { id: string; state?: JobView["state"]; 
       <div className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h1 className="font-mono text-3xl font-semibold tracking-tight text-slate-100">job #{id}</h1>
         {state && (
-          <span className={`font-mono text-sm ${STATE_TONE[state]}`}>
+          <span className={`font-mono text-sm ${JOB_STATE_TONE[state]}`}>
             {state === "running" ? (
               <>
                 <span className="sc-pulse mr-1.5 inline-block h-2 w-2 rounded-full bg-signal align-middle" aria-hidden />
@@ -436,16 +441,16 @@ function walking(leg: Leg): boolean {
 
 /** One line under a route segment: what the leg is, or was. */
 function legLine(leg: Leg, now: Date): string {
-  const took = span(leg.at, leg.end, now);
+  const elapsed = took(leg.at, leg.end, now);
   if (leg.kind === "window") {
     const w = leg.window;
     const head = w.state === "running" ? w.phase : w.state;
     const pct = w.fraction == null ? null : `${Math.round(w.fraction * 100)}%`;
-    return [head, took, pct ? `${pct} of ${bytes(w.global_bytes)}` : null].filter(Boolean).join(" · ");
+    return [head, elapsed, pct ? `${pct} of ${bytes(w.global_bytes)}` : null].filter(Boolean).join(" · ");
   }
   const r = leg.run;
   const head = r.state === "running" ? r.phase : r.state;
-  return [head, took, r.bytes > 0 || r.state !== "running" ? bytes(r.bytes) : null, r.transfers > 0 ? `${r.transfers.toLocaleString()} files` : null]
+  return [head, elapsed, r.bytes > 0 || r.state !== "running" ? bytes(r.bytes) : null, r.transfers > 0 ? `${r.transfers.toLocaleString()} files` : null]
     .filter(Boolean)
     .join(" · ");
 }
@@ -483,7 +488,7 @@ function LegRow({ n, leg, now }: { n: number; leg: Leg; now: Date }) {
         <td className={cell}>{clock(new Date(w.started_at))}</td>
         <td className={cell}>{w.finished_at ? clock(new Date(w.finished_at)) : <span className="text-dim">open</span>}</td>
         <td className={cell}>
-          {span(w.started_at, w.finished_at, now)} <span className="text-dim">/ {w.max_minutes}m</span>
+          {took(w.started_at, w.finished_at, now)} <span className="text-dim">/ {w.max_minutes}m</span>
         </td>
         <td className={cell}>
           {w.global_bytes === 0 ? (
@@ -531,7 +536,7 @@ function LegRow({ n, leg, now }: { n: number; leg: Leg; now: Date }) {
       </td>
       <td className={cell}>{clock(new Date(r.started_at))}</td>
       <td className={cell}>{r.finished_at ? clock(new Date(r.finished_at)) : <span className="text-dim">running</span>}</td>
-      <td className={cell}>{span(r.started_at, r.finished_at, now)}</td>
+      <td className={cell}>{took(r.started_at, r.finished_at, now)}</td>
       <td className={cell}>
         {bytes(r.bytes)}
         {r.total_bytes > r.bytes && <span className="text-dim"> of {bytes(r.total_bytes)}</span>}
@@ -601,7 +606,7 @@ function routeOf(
 
 /* ---------- story ---------- */
 
-function Story({ lines, loading }: { lines: LogLine[]; loading: boolean }) {
+function Story({ lines, truncated, loading }: { lines: LogLine[]; truncated: boolean; loading: boolean }) {
   // The API hands back newest first; a story reads the other way.
   const ordered = useMemo(() => [...lines].reverse(), [lines]);
   if (loading) return <p className="px-4 py-6 text-center text-sm text-dim">Reading the log…</p>;
@@ -610,6 +615,16 @@ function Story({ lines, loading }: { lines: LogLine[]; loading: boolean }) {
   }
   return (
     <ol className="divide-y divide-rule">
+      {/* The page asks for the newest 200 of the span, so a busy stretch opens
+          mid-story. Say so rather than let it read as the beginning. */}
+      {truncated && (
+        <li className="px-4 py-1.5 text-xs text-dim">
+          earlier lines in this stretch are not shown — see{" "}
+          <Link to="/logs" className="text-signal hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-signal">
+            logs
+          </Link>
+        </li>
+      )}
       {ordered.map((l) => (
         <li key={l.id} className="flex gap-3 px-4 py-1.5 text-xs">
           <span className="w-16 shrink-0 font-mono tabular-nums text-dim">{clock(new Date(l.ts))}</span>
@@ -625,20 +640,6 @@ function Story({ lines, loading }: { lines: LogLine[]; loading: boolean }) {
 }
 
 /* ---------- labels, tones, time ---------- */
-
-const KIND_LABEL: Record<JobView["kind"], string> = {
-  sync: "full sync",
-  bisync: "bisync",
-  window: "sync window",
-};
-
-const STATE_TONE: Record<JobView["state"], string> = {
-  running: "text-signal",
-  done: "text-ok",
-  partial: "text-signal",
-  failed: "text-fail",
-  stopped: "text-dry",
-};
 
 const TEXT_TONE = {
   signal: "text-signal",
@@ -657,19 +658,6 @@ function peersLine(windows: WindowView[]): string {
   const seen = windows.filter((w) => w.peers_total > 0);
   if (seen.length === 0) return "—";
   return seen.map((w) => `${w.host} ${w.peers_done}/${w.peers_total}`).join(", ");
-}
-
-function span(from: string, to: string | null, now: Date): string {
-  const end = to ? new Date(to) : now;
-  return duration((end.getTime() - new Date(from).getTime()) / 1000);
-}
-
-function clock(d: Date): string {
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-}
-
-function stamp(d: Date): string {
-  return `${d.toLocaleDateString([], { month: "short", day: "2-digit" })} ${clock(d)}`;
 }
 
 function sameDay(a: Date, b: Date): boolean {

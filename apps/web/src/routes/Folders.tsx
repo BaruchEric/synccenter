@@ -26,8 +26,11 @@ export function Folders() {
   // server managed to plan a crontab: the bisync button must exist for a
   // folder with a Drive member whether or not the schedule could be read.
   const { rclone } = useRcloneHosts();
-  const crons = new Map((schedule.data?.jobs ?? []).map((j) => [j.folder, j.cron]));
-  const windowCrons = new Map((schedule.data?.windows ?? []).map((w) => [w.folder, w.cron]));
+  // One entry per (folder, member) upstream, so a folder with two scheduled
+  // hosts or two cloud members has several: keep them all and let the row show
+  // the soonest, rather than whichever happened to be last.
+  const crons = byFolder(schedule.data?.jobs ?? []);
+  const windowCrons = byFolder(schedule.data?.windows ?? []);
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -71,8 +74,8 @@ export function Folders() {
               key={name}
               name={name}
               rclone={rclone}
-              cron={crons.get(name)}
-              windowCron={windowCrons.get(name)}
+              crons={crons.get(name) ?? []}
+              windowCrons={windowCrons.get(name) ?? []}
             />
           ))}
         </ul>
@@ -84,13 +87,13 @@ export function Folders() {
 function Row({
   name,
   rclone,
-  cron,
-  windowCron,
+  crons,
+  windowCrons,
 }: {
   name: string;
   rclone: Set<string>;
-  cron?: string;
-  windowCron?: string;
+  crons: string[];
+  windowCrons: string[];
 }) {
   const manifest = useQuery({
     queryKey: ["folder", name],
@@ -104,10 +107,10 @@ function Row({
   const hasCloud = cloudMembers(m, rclone).length > 0;
   // The schedule endpoint knows the cron; the manifest is the fallback for
   // when it could not be planned, and the two agree whenever both exist.
-  const bisyncCron = cron ?? m?.bisync?.schedule;
+  const bisyncCrons = crons.length > 0 ? crons : m?.bisync?.schedule ? [m.bisync.schedule] : [];
   const now = new Date();
-  const nextBisync = bisyncCron ? nextRuns(bisyncCron, 1, now)[0] : undefined;
-  const nextWindow = windowCron ? nextRuns(windowCron, 1, now)[0] : undefined;
+  const nextBisync = soonest(bisyncCrons, now);
+  const nextWindow = soonest(windowCrons, now);
 
   return (
     <li className={`px-4 py-3 ${disabled ? "opacity-55" : ""}`}>
@@ -172,7 +175,7 @@ function Row({
         >
           Edit
         </Link>
-        <FolderActions name={name} manifest={m} hasCloudMember={hasCloud} />
+        <FolderActions name={name} manifest={m} rclone={rclone} hasCloudMember={hasCloud} />
       </div>
     </li>
   );
@@ -192,4 +195,18 @@ function JobLink({ id }: { id: number | null }) {
       </Link>
     </>
   );
+}
+
+/** Group per-(folder, member) schedule entries by folder, keeping every cron. */
+function byFolder(entries: Array<{ folder: string; cron: string }>): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const e of entries) out.set(e.folder, [...(out.get(e.folder) ?? []), e.cron]);
+  return out;
+}
+
+/** The first of these crons to fire — what "next window" means for a folder with two. */
+function soonest(crons: string[], now: Date): Date | undefined {
+  return crons
+    .flatMap((c) => nextRuns(c, 1, now))
+    .sort((a, b) => a.getTime() - b.getTime())[0];
 }

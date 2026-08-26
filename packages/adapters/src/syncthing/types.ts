@@ -131,11 +131,15 @@ export interface SyncthingCompletion {
   remoteState?: string;
 }
 
-/** One entry of /rest/system/log. `level` is absent on older daemons. */
+/**
+ * One entry of /rest/system/log. Syncthing 2.x sends `level` as the three
+ * letter code it prints ("INF", "WRN"), not a number; older daemons omit it
+ * entirely. Typed as it arrives, so a reader cannot compare it as a number.
+ */
 export interface SyncthingLogEntry {
   when: string;
   message: string;
-  level?: number;
+  level?: string;
 }
 
 export interface SyncthingLog {

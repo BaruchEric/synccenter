@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { Db } from "../db.ts";
+import { nextBefore, pageParams } from "../lib/paging.ts";
 
 interface HistoryRow {
   id: number;
@@ -39,13 +40,12 @@ export function systemRouter(db: Db): Router {
    * store a real hash.
    */
   r.get("/apply-history", (req, res) => {
-    const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 50) || 50));
-    const before = Number(req.query.before);
+    const page = pageParams(req.query, { max: 500, fallback: 50 });
     const where: string[] = [];
     const params: Array<number | string> = [];
-    if (Number.isInteger(before) && before > 0) {
+    if (page.before !== undefined) {
       where.push("id < ?");
-      params.push(before);
+      params.push(page.before);
     }
     if (typeof req.query.folder === "string" && req.query.folder) {
       where.push("target_name = ?");
@@ -68,10 +68,10 @@ export function systemRouter(db: Db): Router {
          FROM apply_history${where.length ? ` WHERE ${where.join(" AND ")}` : ""}
          ORDER BY id DESC LIMIT ?`,
       )
-      .all(...params, limit);
+      .all(...params, page.limit);
     res.json({
       history: rows.map(({ payload_hash, ...row }) => ({ ...row, kind: kindOf(payload_hash) })),
-      nextBefore: rows.length === limit ? rows[rows.length - 1]!.id : null,
+      nextBefore: nextBefore(rows, page.limit),
     });
   });
 
