@@ -15,6 +15,7 @@ const SCHEMA = [
      note TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS apply_history_target ON apply_history (target_kind, target_name)`,
+  `CREATE INDEX IF NOT EXISTS apply_history_name ON apply_history (target_name, id DESC)`,
 
   `CREATE TABLE IF NOT EXISTS conflict_ledger (
      id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,6 +59,7 @@ const SCHEMA = [
    )`,
   `CREATE INDEX IF NOT EXISTS runs_active ON runs (state) WHERE state = 'running'`,
   `CREATE INDEX IF NOT EXISTS runs_recent ON runs (started_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS runs_folder ON runs (folder, id DESC)`,
 
   // Sync windows: the stretches where a scheduled/manual Syncthing member
   // (paused the rest of the time) is resumed, catches up, and is paused again.
@@ -87,6 +89,7 @@ const SCHEMA = [
    )`,
   `CREATE INDEX IF NOT EXISTS sync_windows_active ON sync_windows (state) WHERE state = 'running'`,
   `CREATE INDEX IF NOT EXISTS sync_windows_recent ON sync_windows (started_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS sync_windows_folder ON sync_windows (folder, id DESC)`,
 
   // SyncCenter's own operational log: what the engine, the run tracker and
   // the mutation routes did and why, one line per step. apply_history is the

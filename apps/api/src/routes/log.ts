@@ -22,8 +22,8 @@ export function logRouter(log: Log): Router {
       ...(isLevel(level) ? { level } : {}),
       ...(typeof req.query.source === "string" && req.query.source ? { source: req.query.source } : {}),
       ...(typeof req.query.q === "string" && req.query.q ? { q: req.query.q } : {}),
-      ...(isIso(req.query.since) ? { since: req.query.since } : {}),
-      ...(isIso(req.query.until) ? { until: req.query.until } : {}),
+      ...(isIso(req.query.since) ? { since: iso(req.query.since) } : {}),
+      ...(isIso(req.query.until) ? { until: iso(req.query.until) } : {}),
     });
     res.json({
       lines,
@@ -38,7 +38,16 @@ function isLevel(v: string): v is LogLevel {
   return LEVELS.has(v as LogLevel);
 }
 
-/** A timestamp the row's `ts` (ISO, UTC) compares against as text. */
+/** Anything Date.parse understands; `iso` then spells it the way `ts` is written. */
 function isIso(v: unknown): v is string {
   return typeof v === "string" && v.length >= 10 && !Number.isNaN(Date.parse(v));
+}
+
+/**
+ * The row's `ts` is ISO UTC and the filter compares it as text, so the bound
+ * has to be spelled the same way: an offset form or a bare date would sort
+ * against the digits rather than the instant.
+ */
+function iso(v: string): string {
+  return new Date(v).toISOString();
 }

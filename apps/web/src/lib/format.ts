@@ -37,3 +37,27 @@ export function tailPath(p: string, segments = 2): string {
   const parts = p.split("/").filter(Boolean);
   return parts.length <= segments ? p : `…/${parts.slice(-segments).join("/")}`;
 }
+
+/** How long something took, or has taken so far: from an ISO start to an ISO end, or to `now` while it runs. */
+export function took(from: string, to: string | null, now: Date): string {
+  const end = to ? new Date(to) : now;
+  return duration((end.getTime() - new Date(from).getTime()) / 1000);
+}
+
+/** `14:03:27` (or `14:03` without seconds): the time of day, 24-hour. */
+export function clock(d: Date, seconds = true): string {
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), hour12: false });
+}
+
+/** `Aug 25 14:03:27`: the clock with its day, for when the day is not obvious. */
+export function stamp(d: Date, seconds = true): string {
+  return `${d.toLocaleDateString([], { month: "short", day: "2-digit" })} ${clock(d, seconds)}`;
+}
+
+/**
+ * The value for a `<time dateTime>`: `toISOString` throws on an invalid
+ * date, and one unparsable timestamp in a row must not blank the page.
+ */
+export function isoAttr(d: Date): string | undefined {
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
