@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path/posix";
+
 import { mapPolicy } from "./conflict.ts";
 import type { FolderManifest, RcloneHostManifest, SyncthingHostManifest } from "./load.ts";
 import type { SchedulePlan, HostName } from "./types.ts";
@@ -41,6 +43,7 @@ export function buildSchedulePlan(
     localPath,
     remotePath,
     `--filters-file=${filtersFile}`,
+    ...workdirFlag(filtersFile, effectiveFlags),
     ...effectiveFlags,
   ].join(" ");
 
@@ -52,4 +55,28 @@ export function buildSchedulePlan(
     command: cmd,
     filtersFile,
   }];
+}
+
+/**
+ * rclone keeps every bisync baseline listing in --workdir, which defaults to
+ * /root/.cache/rclone/bisync — inside the rclone-rcd container's writable
+ * layer. Recreating that container therefore destroys the baselines, and the
+ * next scheduled run aborts with "cannot find prior Path1 or Path2 listings",
+ * recoverable only by a full --resync. That is exactly what happened on
+ * 2026-09-05: one container recreation silently killed the cloud leg of every
+ * folder, and nothing noticed for four days.
+ *
+ * The filters directory is already bind-mounted and survives, so park the
+ * workdir beside it. A user-supplied --workdir still wins.
+ */
+export function bisyncWorkdirFor(filtersFile: string): string | undefined {
+  const filtersDir = dirname(filtersFile);
+  if (filtersDir === "." || filtersDir === "/") return undefined;
+  return join(dirname(filtersDir), "bisync-workdir");
+}
+
+function workdirFlag(filtersFile: string, userFlags: readonly string[]): string[] {
+  if (userFlags.some((f) => f === "--workdir" || f.startsWith("--workdir="))) return [];
+  const workdir = bisyncWorkdirFor(filtersFile);
+  return workdir ? [`--workdir=${workdir}`] : [];
 }

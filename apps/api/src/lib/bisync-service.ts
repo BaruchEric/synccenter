@@ -1,6 +1,11 @@
 import { existsSync } from "node:fs";
 import { RcloneClient, RcloneError } from "@synccenter/adapters";
-import { loadAllHosts, PlanError, resolveBisyncAnchor } from "@synccenter/apply-planner";
+import {
+  bisyncWorkdirFor,
+  loadAllHosts,
+  PlanError,
+  resolveBisyncAnchor,
+} from "@synccenter/apply-planner";
 import type { ApiConfig } from "../config.ts";
 import type { Db } from "../db.ts";
 import type { HostRegistry } from "../registry.ts";
@@ -144,6 +149,16 @@ export async function startBisync(
       });
     }
     throw err;
+  }
+
+  // Cron passes --workdir explicitly (see buildSchedulePlan). An on-demand run
+  // that left it at rclone's default would keep its baseline listings in the
+  // rclone-rcd container's writable layer — a SECOND, throwaway baseline for
+  // the same pair. The two would then disagree about what was last synced, and
+  // the container's copy dies with the container. Same default, both paths.
+  const workdir = bisyncWorkdirFor(filter.path);
+  if (workdir !== undefined && flagPlan.params.workdir === undefined) {
+    flagPlan.params.workdir = workdir;
   }
 
   const path2 = `${member.remote}:${m.paths[memberName]}`;

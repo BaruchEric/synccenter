@@ -173,7 +173,7 @@
       "member": "gdrive",
       "folder": "example-code-projects",
       "cron": "*/15 * * * *",
-      "command": "docker exec rclone-rcd rclone --config=/config/rclone.conf bisync /share/Sync/code gdrive:sync/code --filters-file=/share/synccenter-config/compiled/dev-monorepo/filter.rclone --resilient --recover --max-lock=2m --conflict-resolve=newer --compare=size,modtime,checksum",
+      "command": "docker exec rclone-rcd rclone --config=/config/rclone.conf bisync /share/Sync/code gdrive:sync/code --filters-file=/share/synccenter-config/compiled/dev-monorepo/filter.rclone --workdir=/share/synccenter-config/compiled/bisync-workdir --resilient --recover --max-lock=2m --conflict-resolve=newer --compare=size,modtime,checksum",
       "filtersFile": "/share/synccenter-config/compiled/dev-monorepo/filter.rclone"
     }
   ],

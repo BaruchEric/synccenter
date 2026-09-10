@@ -35,6 +35,36 @@ describe("buildSchedulePlan", () => {
     expect(plans[0]!.command).toContain("--resilient");
   });
 
+  it("parks the bisync workdir beside the filters file, not in the container cache", () => {
+    const folder: FolderManifest = {
+      name: "code", ruleset: "dev-monorepo", type: "send-receive",
+      paths: { "qnap-ts453d": "/share/Sync/code", gdrive: "sync/code" },
+      bisync: { schedule: "*/15 * * * *", flags: ["--resilient"] },
+    };
+    const plans = buildSchedulePlan(folder, GDRIVE, QNAP, "/config/filters/dev-monorepo.rclone");
+    expect(plans[0]!.command).toContain("--workdir=/config/bisync-workdir");
+  });
+
+  it("keeps an explicit --workdir instead of adding a second one", () => {
+    const folder: FolderManifest = {
+      name: "code", ruleset: "dev-monorepo", type: "send-receive",
+      paths: { "qnap-ts453d": "/share/Sync/code", gdrive: "sync/code" },
+      bisync: { schedule: "*/15 * * * *", flags: ["--workdir=/mnt/elsewhere"] },
+    };
+    const cmd = buildSchedulePlan(folder, GDRIVE, QNAP, "/config/filters/dev-monorepo.rclone")[0]!.command;
+    expect(cmd).toContain("--workdir=/mnt/elsewhere");
+    expect(cmd).not.toContain("bisync-workdir");
+  });
+
+  it("omits --workdir when the filters path has no usable parent", () => {
+    const folder: FolderManifest = {
+      name: "code", ruleset: "dev-monorepo", type: "send-receive",
+      paths: { "qnap-ts453d": "/share/Sync/code", gdrive: "sync/code" },
+      bisync: { schedule: "*/15 * * * *" },
+    };
+    expect(buildSchedulePlan(folder, GDRIVE, QNAP, "/f")[0]!.command).not.toContain("--workdir");
+  });
+
   it("per-member overrides beat folder-level bisync settings", () => {
     const folder: FolderManifest = {
       name: "code", ruleset: "dev-monorepo", type: "send-receive",
