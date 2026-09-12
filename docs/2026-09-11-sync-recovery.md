@@ -682,3 +682,790 @@ same small outstanding changes and zero errors. No cloud run is active.
 The existing queued runners are unchanged. The user was already notified
 of the disconnected required peer; no repeated notification, restart,
 duplicate job, or bypass of peer verification was made this check.
+
+### Heartbeat 2026-09-12 08:40 UTC
+
+Omarchy remains unreachable on a bounded direct API probe. Mac now reports
+idle with zero outstanding items/bytes/errors across all four folders.
+NAS Arik/window 343 is scanning with two needed items / 1,170,924 bytes;
+NAS dev/window 342 is scanning with 484 needed items / 462,961 bytes.
+Both report zero errors. NAS BaruchRio and memory-vault remain paused;
+their empty status is not convergence evidence. Jobs 10 and 11 remain the
+only active tracked jobs, with no cloud runs yet, and the existing runner
+log is unchanged. No restart, duplicate runner, or verification bypass was
+performed. The previously reported offline PC remains the same blocker;
+no repeated user notification is needed.
+
+### Heartbeat 2026-09-12 08:51 UTC
+
+Omarchy remains unreachable. Mac is idle with zero outstanding items and
+errors on all four folders. NAS dev's backlog decreased to three items /
+15,595 bytes while scanning; Arik remains scanning with two items /
+1,170,924 bytes. Both report zero errors. Jobs 10/window 342 and 11/window
+343 remain active with their existing caps and no cloud runs; queued
+runners are unchanged. Other NAS folders remain paused. No intervention
+or repeated notification was needed for this unchanged peer outage.
+
+### Heartbeat 2026-09-12 09:02 UTC
+
+Omarchy remains unreachable on its direct API. All four Mac folders are
+idle with zero outstanding items/errors. NAS scans remain error-free:
+Arik needs two items / 1,170,967 bytes, dev 18 items / 345,990 bytes.
+Changing outstanding counts do not establish scan completion. Jobs 10 and
+11 retain windows 342 (720 minutes) and 343 (90 minutes), with no cloud
+runs. The existing runner log is unchanged, and the other NAS folders
+remain paused. Deployment still awaits an idle boundary; no duplicate work,
+restart, or repeated outage notification was performed.
+
+### Heartbeat 2026-09-12 09:13 UTC
+
+Omarchy remains unreachable. Mac remains idle/current with zero errors
+across all four folders. NAS Arik and dev remain scanning without errors,
+with two items / 1,170,940 bytes and 24 items / 426,691 bytes respectively.
+Jobs 10 and 11 have no cloud runs; the existing runner log is unchanged.
+Extended Arik window 343 from 90 to 720 minutes through the authenticated
+API (HTTP 200, running state and new cap confirmed), allowing this known
+long scan and required peer recovery to finish without an imminent timeout.
+Dev window 342 already has the same recovery cap. No restart, duplicate
+runner, or bypass of peer completion was performed. The offline PC remains
+the previously reported blocker; no additional user action is requested.
+
+### Heartbeat 2026-09-12 09:24 UTC
+
+Omarchy remains unreachable; all four Mac folders are idle with zero
+outstanding items/errors. NAS Arik and dev remain scanning with three
+items / 1,253,078 bytes and 27 items / 464,949 bytes respectively, without
+reported errors. Windows 343 and 342 both confirm 720-minute caps. Jobs
+11 and 10 remain active with no cloud runs; the existing runner log is
+unchanged. Other NAS folders remain paused. No new blocker, restart,
+duplicate work, or repeated user notification this check.
+
+### Heartbeat 2026-09-12 09:35 UTC
+
+Omarchy remains unreachable. Mac reports idle with zero outstanding items
+and errors on all four folders. NAS Arik/dev scans continue with three
+items / 1,253,093 bytes and 468 items / 517,853 bytes, respectively; both
+report zero errors. Jobs 11/window 343 and 10/window 342 remain active with
+720-minute caps and no cloud runs. Existing runners are unchanged; other
+NAS folders remain paused. No new failure or additional user action was
+identified, and no restart or duplicate work was initiated.
+
+### Heartbeat 2026-09-12 09:46 UTC
+
+Omarchy remains unreachable. All Mac folders report zero needed items and
+errors; dev is scanning and the other three are idle. NAS Arik/dev remain
+scanning with three items / 1,253,097 bytes and 469 items / 525,376 bytes,
+respectively, with zero reported errors. Jobs 11/343 and 10/342 remain
+active with 720-minute caps and no cloud runs. The queued runner log is
+unchanged; other NAS folders remain paused. No new actionable change,
+restart, duplicate work, or repeated outage notification this check.
+
+### Heartbeat 2026-09-12 09:57 UTC
+
+Direct checks match the previous snapshot: Omarchy is unreachable; Mac dev
+is scanning with zero outstanding items/errors, and the other Mac folders
+are idle with zero outstanding items/errors. NAS Arik/dev are scanning
+with three items / 1,253,097 bytes and 469 items / 525,376 bytes; reported
+errors remain zero. Jobs 11/343 and 10/342 retain 720-minute caps and no
+cloud runs. Existing runners are unchanged and other NAS folders remain
+paused. No new actionable change or intervention this check.
+
+### Heartbeat 2026-09-12 10:08 UTC — dev source index mismatch
+
+NAS dev finished scanning and reports 14 pull errors, all under
+homelab/services/memory/collaborative: "syncing: finishing: pull: no such
+file". The README sample exists on both endpoints, but the Mac's local
+and NAS global index advertise 27,060 bytes (09:11 UTC modification),
+while the current Mac file is 12,803 bytes (09:58 UTC modification).
+NAS still has the older 23,054-byte file. This verifies stale advertised
+source metadata for the sample during active edits; it does not prove
+that every error has the same cause. Requested a targeted Mac scan for
+that subtree; completion must be checked on the next poll. No files were
+overwritten or removed manually.
+
+Omarchy remains unreachable. NAS Arik is scanning with three items /
+1,253,115 bytes and zero errors. Mac dev is scanning; other Mac folders
+are idle with zero outstanding items/errors. Jobs 10/342 and 11/343 are
+still active with 720-minute caps and no cloud runs. Existing runners
+remain unchanged. Keep deployment pending; verify fresh source indexes
+and native pull retries before declaring these new errors resolved.
+
+### Heartbeat 2026-09-12 10:20 UTC
+
+Mac dev remains scanning (422 needed items, zero bytes/errors); the sample
+README index still advertises 27,060 bytes on Mac and NAS, while NAS's
+local index remains 23,054 bytes. The requested targeted scan has not yet
+produced a refreshed sample index. NAS dev still reports the same 14
+outstanding items / 323,533 bytes and 14 errors. Do not duplicate scan
+requests or overwrite files to bypass this unresolved source-index issue.
+NAS Arik remains scanning with 21 items / 205,635,689 bytes and zero errors.
+Other Mac folders are idle with zero outstanding items/errors; other NAS
+folders remain paused. Omarchy remains unreachable. Jobs 10/342 and
+11/343 and their queued runners remain active/unchanged, with no cloud
+runs. The already reported blockers persist; no repeated notification.
+
+### Heartbeat 2026-09-12 10:31 UTC
+
+The sample source index remains unchanged at 27,060 bytes on Mac and NAS;
+NAS still has 23,054 bytes locally. Mac dev remains scanning with 422
+needed items / zero bytes and no errors. NAS dev retains 14 needed items /
+323,533 bytes and 14 errors. NAS Arik remains scanning with 21 items /
+205,635,691 bytes and no errors. Other Mac folders are idle/current; other
+NAS folders are paused. Omarchy remains unreachable. Jobs 10/342 and
+11/343 retain their caps and have no cloud runs; existing runners remain
+unchanged. No duplicate scan, restart, or repeated notification this check.
+
+### Heartbeat 2026-09-12 10:42 UTC
+
+NAS dev's outstanding count/errors decreased from 14 to 11, with 193,395
+needed bytes. The README sample index remains unchanged (Mac/global
+27,060 bytes, NAS local 23,054 bytes), so source-index recovery is not
+complete. Mac dev is scanning with 436 needed items / zero bytes/errors;
+Mac Arik is scanning with zero outstanding items/errors. NAS Arik remains
+scanning with 21 items / 205,635,777 bytes and no errors. Other Mac folders
+are idle/current and other NAS folders remain paused. Omarchy remains
+unreachable. Active jobs 10/342 and 11/343 and the existing runner log are
+unchanged, without cloud runs. No duplicate work or repeated notification.
+
+### Heartbeat 2026-09-12 10:53 UTC — dev pull errors cleared
+
+Mac and NAS dev are now idle with zero outstanding items/bytes/errors.
+The README sample index refreshed to 13,768 bytes on both endpoints,
+and independent on-disk MD5 checks match:
+d4bb0ce4146ca304af9020f713b478ba. Native scanning/pulling resolved the
+previously reported errors without manual file replacement. All four Mac
+folders are idle with zero outstanding items/errors.
+
+Dev job 10/window 342 is settling with one of two peers complete; Omarchy
+remains unreachable. NAS Arik job 11/window 343 remains scanning with 21
+items / 205,635,772 bytes and no errors. Both windows retain 720-minute
+caps; no cloud runs have started and the existing runner log is unchanged.
+Other NAS folders remain paused. Deployment, remaining cloud verification,
+and required PC peer completion are still pending.
+
+### Heartbeat 2026-09-12 11:04 UTC
+
+NAS Arik has finished scanning and now joins NAS dev at idle with zero
+outstanding items/bytes/errors. All four Mac folders are also idle with
+zero outstanding items/errors. Omarchy remains unreachable, so required
+peer verification is incomplete. Other NAS folders remain paused and their
+empty statuses are not used as convergence evidence. Jobs 10/342 and
+11/343 remain active with no cloud runs; existing runners are unchanged.
+The offline peer remains the previously reported blocker. No restart,
+duplicate work, or repeated user notification was needed this check.
+
+### Heartbeat 2026-09-12 11:15 UTC
+
+All four Mac folders and active NAS Arik/dev remain idle with zero
+outstanding items/bytes/errors. Omarchy remains unreachable. Jobs 10/342
+and 11/343 are settling with one of two peers complete, retain 720-minute
+caps, and have no cloud runs. Existing runners are unchanged; other NAS
+folders remain paused. The required offline peer is the same outstanding
+blocker. No restart, duplicate work, or repeated notification this check.
+
+### Heartbeat 2026-09-12 11:26 UTC
+
+Direct checks remain unchanged: all Mac folders and active NAS Arik/dev
+are idle with zero outstanding items/bytes/errors; Omarchy is unreachable.
+Jobs 10/window 342 and 11/window 343 remain settling at one of two peers,
+with 720-minute caps and no cloud runs. Existing runners are unchanged;
+other NAS folders remain paused. No new actionable change, duplicate work,
+restart, or repeated notification this check.
+
+### Heartbeat 2026-09-12 11:36 UTC
+
+All four Mac folders and active NAS Arik/dev remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342 and 11/343
+remain settling at one of two peers, with 720-minute caps and no cloud
+runs. Existing runners are unchanged; other NAS folders remain paused.
+No new actionable change, restart, duplicate work, or repeated notification.
+
+### Heartbeat 2026-09-12 11:47 UTC
+
+Live status remains unchanged: all Mac folders and active NAS Arik/dev
+are idle with zero outstanding items/bytes/errors. Omarchy is unreachable.
+Jobs 10/342 and 11/343 remain settling at one of two peers, with their
+720-minute caps and no cloud runs. The existing runner log is unchanged;
+other NAS folders remain paused. No new actionable change or intervention.
+
+### Heartbeat 2026-09-12 11:58 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and active NAS Arik/dev are idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342 and 11/343 remain settling at
+one of two peers, with 720-minute caps and no cloud runs. Existing runners
+are unchanged, and other NAS folders remain paused. No new actionable
+change, duplicate work, restart, or repeated notification this check.
+
+### Heartbeat 2026-09-12 12:11 UTC — BaruchRio metadata blockers
+
+Scheduled BaruchRio job 12/window 344 (45-minute cap) opened and reported
+seven globally deleted directories blocked by ignored files. A bounded
+inspection of the seven paths under 5916-5922 Maywood Avenue found only
+seven .DS_Store files. Copied each with metadata and verified byte equality
+using cmp into the private recovery backup's
+baruchrio-metadata-20260912-1210 directory, numbered 0–6 in this order:
+Banks, Escrow, Mario, Photos, Rio Cycles LLC, Rio Cycles LLC/313759431,
+Rio Rapid Wash LLC (Maywood Laundromat). Removed only the verified metadata
+originals, then used rmdir on the seven globally deleted, now-empty
+directories (child before parent). No substantive files were removed.
+A targeted scan returned HTTP 200; needed items fell to zero, though the
+seven prior errors remain displayed pending native retry/status refresh.
+Verify those clear before calling this repair complete.
+
+NAS Arik/dev remain idle with zero needed items/errors. Mac dev is scanning
+with 422 needed items / zero bytes/errors; other Mac folders are idle/current.
+Omarchy remains unreachable. Jobs 10/342 and 11/343 remain active, along
+with the new scheduled window; no cloud runs started. Existing runners
+are unchanged. Memory-vault NAS remains paused. No duplicate runners or
+API restart was performed.
+
+### Heartbeat 2026-09-12 12:21 UTC
+
+BaruchRio's seven metadata-related errors have cleared: NAS BaruchRio,
+Arik, and dev now report idle with zero outstanding items/bytes/errors.
+All four Mac folders are likewise idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 are settling
+with one of two required peers complete; no cloud runs have started.
+Extended window 344 from 45 to 720 minutes through the authenticated API
+(HTTP 200, running state and cap confirmed) to preserve peer verification
+during the existing outage. Other recovery windows retain 720-minute caps.
+Existing runners are unchanged; memory-vault NAS remains paused. No new
+user action or repeated notification is needed.
+
+### Heartbeat 2026-09-12 12:32 UTC
+
+All four Mac folders and NAS Arik/dev/BaruchRio remain idle with zero
+outstanding items/bytes/errors. Omarchy remains unreachable. Jobs 10/342,
+11/343, and 12/344 are settling with one of two peers complete, all with
+720-minute caps and no cloud runs. Existing runners are unchanged;
+memory-vault NAS remains paused. No new actionable change or intervention.
+
+### Heartbeat 2026-09-12 12:43 UTC — runner deadlines reached
+
+The three detached recovery runners exited at their 12-hour deadlines
+around 12:37 UTC. Dev reported job 10 still running; Arik and BaruchRio
+reported timeout waiting for the shared scheduled-sync lock. These runner
+exits did not stop the tracked windows: jobs 10/342, 11/343, and 12/344
+remain running/settling with one of two peers complete and 720-minute caps.
+No cloud runs have started. Do not describe the runners as queued anymore,
+and do not duplicate dev job 10. Once the peer returns, inspect tracked job
+10 to completion, then resume only the remaining cloud pipelines after
+checking for any newer scheduled runner/job activity.
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable; memory-vault NAS remains
+paused. No restart or retry was initiated against active tracked work.
+This is a material orchestration change, not a new file-transfer error.
+
+### Heartbeat 2026-09-12 12:54 UTC
+
+All four Mac folders and NAS Arik/dev/BaruchRio remain idle with zero
+outstanding items/bytes/errors. Omarchy remains unreachable. Tracked jobs
+10/342, 11/343, and 12/344 remain settling at one of two peers with
+720-minute caps and no cloud runs. The runner log still ends with the
+12:37 deadline failures; no replacement runners were started. Memory-vault
+NAS remains paused. No new actionable change or repeated notification.
+
+### Heartbeat 2026-09-12 13:05 UTC
+
+Live checks are unchanged: all Mac folders and NAS Arik/dev/BaruchRio
+remain idle with zero needed items/bytes/errors. Omarchy is unreachable.
+Jobs 10/342, 11/343, and 12/344 remain settling at one of two peers with
+720-minute caps and no cloud runs. The runner log still ends with the
+previously reported 12:37 deadline failures. No replacement runner or
+restart was initiated; memory-vault NAS remains paused. No new user action.
+
+### Heartbeat 2026-09-12 13:16 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runners were started. Memory-vault NAS remains paused. No new actionable
+change, restart, or repeated notification this check.
+
+### Heartbeat 2026-09-12 13:27 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 are still settling at one of two peers, with 720-minute caps
+and no cloud runs. The runner log retains the same deadline failures;
+no replacement runners or restart were initiated. Memory-vault NAS remains
+paused. No new actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 13:38 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain active
+with 720-minute caps and no cloud runs. The runner log still ends with the
+12:37 deadline failures; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable change this check.
+
+### Heartbeat 2026-09-12 13:49 UTC
+
+Status remains unchanged: Mac dev is scanning with zero needed items/bytes/
+errors; other Mac folders and NAS Arik/dev/BaruchRio are idle with zero
+outstanding items/errors. Omarchy is unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification.
+
+### Heartbeat 2026-09-12 14:00 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio are idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers, with 720-minute caps and
+no cloud runs. The runner log still ends with the known deadline failures;
+no replacement runner or restart was initiated. Memory-vault NAS remains
+paused. No new actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 14:11 UTC
+
+Live checks remain unchanged: all Mac folders and NAS Arik/dev/BaruchRio
+are idle with zero needed items/bytes/errors. Omarchy remains unreachable.
+Jobs 10/342, 11/343, and 12/344 remain settling at one of two peers with
+720-minute caps and no cloud runs. Runner deadline failures are unchanged;
+no replacement runner or restart was initiated. Memory-vault NAS remains
+paused. No new actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 14:22 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 14:33 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 14:44 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. The runner log still ends with the known deadline failures;
+no replacement runner or restart was initiated. Memory-vault NAS remains
+paused. No new actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 14:55 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain settling
+at one of two peers with 720-minute caps and no cloud runs. The runner log
+retains the same deadline failures; no replacement runner or restart was
+initiated. Memory-vault NAS remains paused. No new actionable change.
+
+### Heartbeat 2026-09-12 15:06 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain settling
+at one of two peers with 720-minute caps and no cloud runs. Runner deadline
+failures are unchanged; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable change this check.
+
+### Heartbeat 2026-09-12 15:17 UTC
+
+Mac dev is scanning with 422 needed items / zero bytes/errors; other Mac
+folders and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/
+errors. Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain
+active with 720-minute caps and no cloud runs. The runner log still ends
+with the known deadline failures; no replacement runner or restart was
+initiated. Memory-vault NAS remains paused. No new actionable blocker.
+
+### Heartbeat 2026-09-12 15:28 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio are idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 15:39 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 15:50 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. The runner log retains the same deadline failures; no
+replacement runner or restart was initiated. Memory-vault NAS remains
+paused. No new actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 16:01 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 16:12 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 16:23 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain settling
+at one of two peers with 720-minute caps and no cloud runs. Runner deadline
+failures are unchanged; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable change this check.
+
+### Heartbeat 2026-09-12 16:34 UTC
+
+Mac dev is scanning with 422 needed items / zero bytes/errors; other Mac
+folders and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/
+errors. Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain
+active with 720-minute caps and no cloud runs. The runner log retains the
+same deadline failures; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable blocker this check.
+
+### Heartbeat 2026-09-12 16:45 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio are idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 16:56 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 17:07 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 17:18 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 17:29 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 17:40 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 17:51 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain settling
+at one of two peers with 720-minute caps and no cloud runs. Runner deadline
+failures are unchanged; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable change this check.
+
+### Heartbeat 2026-09-12 18:01 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain settling
+at one of two peers with 720-minute caps and no cloud runs. Runner deadline
+failures are unchanged; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable change this check.
+
+### Heartbeat 2026-09-12 18:12 UTC
+
+Mac dev is scanning with 436 needed items / zero bytes/errors; other Mac
+folders and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/
+errors. Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain
+active with 720-minute caps and no cloud runs. The runner log retains the
+same deadline failures; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable blocker this check.
+
+### Heartbeat 2026-09-12 18:23 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio are idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 18:34 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 18:45 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 18:56 UTC
+
+All Mac folders and NAS Arik/dev/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 10/342, 11/343,
+and 12/344 remain settling at one of two peers with 720-minute caps and
+no cloud runs. Runner deadline failures are unchanged; no replacement
+runner or restart was initiated. Memory-vault NAS remains paused. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 19:07 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain settling
+at one of two peers with 720-minute caps and no cloud runs. Runner deadline
+failures are unchanged; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable change this check.
+
+### Heartbeat 2026-09-12 19:18 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/errors.
+Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain settling
+at one of two peers with 720-minute caps and no cloud runs. Runner deadline
+failures are unchanged; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable change this check.
+
+### Heartbeat 2026-09-12 19:29 UTC
+
+Mac dev is scanning with 436 needed items / zero bytes/errors; other Mac
+folders and NAS Arik/dev/BaruchRio remain idle with zero outstanding items/
+errors. Omarchy remains unreachable. Jobs 10/342, 11/343, and 12/344 remain
+active with 720-minute caps and no cloud runs. Dev window 342 approaches
+its maximum recovery deadline around 19:38 UTC; inspect its resulting job
+state next rather than bypassing required peer completion. Runner deadline
+failures are unchanged; no replacement runner or restart was initiated.
+Memory-vault NAS remains paused. No new actionable blocker this check.
+
+### Heartbeat 2026-09-12 19:40 UTC — dev window timed out
+
+Dev job 10 is now failed: window 342 closed at its 720-minute cap with
+one of two peers complete. It has no cloud run; the pre-cloud gate did
+not bypass incomplete peer verification. NAS dev is now paused, so its
+empty status is not convergence evidence. A fresh dev pipeline will be
+needed after Omarchy returns and current job activity is checked.
+
+All Mac folders are idle with zero needed items/bytes/errors. NAS Arik and
+BaruchRio are idle with zero outstanding items/errors; jobs 11/343 and
+12/344 remain settling at one of two peers. Omarchy remains unreachable.
+Arik window 343 approaches its cap around 20:00 UTC. Memory-vault NAS is
+still paused; runner deadline failures are unchanged. No restart or
+replacement pipeline was started during the unresolved peer outage.
+
+### Heartbeat 2026-09-12 19:51 UTC
+
+All Mac folders and active NAS Arik/BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. Jobs 11/343 and 12/344
+remain settling at one of two peers with 720-minute caps and no cloud runs.
+Dev job 10 remains failed following window 342's timeout; NAS dev and
+memory-vault remain paused. Runner deadline failures are unchanged. No
+replacement pipeline or restart was initiated; no new actionable change.
+
+### Heartbeat 2026-09-12 20:02 UTC — Arik window timed out
+
+Arik job 11/window 343 reached its 720-minute cap and timed out with one
+of two peers complete. NAS Arik is now paused, along with dev and
+memory-vault; their empty statuses are not convergence evidence. Dev job
+10 remains failed from its earlier timeout. Neither job contains a cloud
+run. BaruchRio job 12/window 344 remains active/settling at one of two
+peers, with a 720-minute cap. All Mac folders and active NAS BaruchRio
+are idle with zero needed items/bytes/errors. Omarchy remains unreachable.
+Runner deadline failures are unchanged. No duplicate pipeline or restart
+was initiated; current peer status must be checked before retrying.
+
+### Heartbeat 2026-09-12 20:13 UTC
+
+All Mac folders and active NAS BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. BaruchRio job 12/window
+344 remains settling at one of two peers with a 720-minute cap and no
+cloud run. Dev/Arik jobs 10/11 remain failed from their window timeouts;
+NAS dev, Arik, and memory-vault remain paused. Runner deadline failures
+are unchanged; no replacement pipeline or restart was initiated. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 20:24 UTC
+
+All Mac folders and active NAS BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. BaruchRio job 12/window
+344 remains settling at one of two peers with a 720-minute cap and no
+cloud run. Dev/Arik jobs 10/11 remain failed from their window timeouts;
+NAS dev, Arik, and memory-vault remain paused. Runner deadline failures
+are unchanged; no replacement pipeline or restart was initiated. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 20:35 UTC
+
+All Mac folders and active NAS BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. BaruchRio job 12/window
+344 remains settling at one of two peers with a 720-minute cap and no
+cloud run. Dev/Arik jobs 10/11 remain failed from their window timeouts;
+NAS dev, Arik, and memory-vault remain paused. Runner deadline failures
+are unchanged; no replacement pipeline or restart was initiated. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 20:46 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and active NAS BaruchRio are idle with zero outstanding items/errors.
+Omarchy remains unreachable. BaruchRio job 12/window 344 remains settling
+at one of two peers with a 720-minute cap and no cloud run. Dev/Arik jobs
+10/11 remain failed from their window timeouts; NAS dev, Arik, and
+memory-vault remain paused. Runner deadline failures are unchanged; no
+replacement pipeline or restart was initiated. No new actionable change.
+
+### Heartbeat 2026-09-12 20:57 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and active NAS BaruchRio are idle with zero outstanding items/errors.
+Omarchy remains unreachable. BaruchRio job 12/window 344 remains settling
+at one of two peers with a 720-minute cap and no cloud run. Dev/Arik jobs
+10/11 remain failed from their window timeouts; NAS dev, Arik, and
+memory-vault remain paused. Runner deadline failures are unchanged; no
+replacement pipeline or restart was initiated. No new actionable change.
+
+### Heartbeat 2026-09-12 21:08 UTC
+
+Mac dev is scanning with 436 needed items / zero bytes/errors; other Mac
+folders and active NAS BaruchRio are idle with zero outstanding items/
+errors. Omarchy remains unreachable. BaruchRio job 12/window 344 remains
+settling at one of two peers with a 720-minute cap and no cloud run.
+Dev/Arik jobs 10/11 remain failed from their window timeouts; NAS dev,
+Arik, and memory-vault remain paused. Runner deadline failures are
+unchanged; no replacement pipeline or restart was initiated. No new
+actionable blocker this check.
+
+### Heartbeat 2026-09-12 21:19 UTC
+
+All Mac folders and active NAS BaruchRio are idle with zero needed items/
+bytes/errors. Omarchy remains unreachable. BaruchRio job 12/window 344
+remains settling at one of two peers with a 720-minute cap and no cloud
+run. Dev/Arik jobs 10/11 remain failed from their window timeouts; NAS dev,
+Arik, and memory-vault remain paused. Runner deadline failures are unchanged;
+no replacement pipeline or restart was initiated. No new actionable change.
+
+### Heartbeat 2026-09-12 21:30 UTC
+
+All Mac folders and active NAS BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. BaruchRio job 12/window
+344 remains settling at one of two peers with a 720-minute cap and no
+cloud run. Dev/Arik jobs 10/11 remain failed from their window timeouts;
+NAS dev, Arik, and memory-vault remain paused. Runner deadline failures
+are unchanged; no replacement pipeline or restart was initiated. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 21:41 UTC
+
+All Mac folders and active NAS BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. BaruchRio job 12/window
+344 remains settling at one of two peers with a 720-minute cap and no
+cloud run. Dev/Arik jobs 10/11 remain failed from their window timeouts;
+NAS dev, Arik, and memory-vault remain paused. Runner deadline failures
+are unchanged; no replacement pipeline or restart was initiated. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 21:52 UTC
+
+All Mac folders and active NAS BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. BaruchRio job 12/window
+344 remains settling at one of two peers with a 720-minute cap and no
+cloud run. Dev/Arik jobs 10/11 remain failed from their window timeouts;
+NAS dev, Arik, and memory-vault remain paused. Runner deadline failures
+are unchanged; no replacement pipeline or restart was initiated. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 22:03 UTC
+
+All Mac folders and active NAS BaruchRio remain idle with zero needed
+items/bytes/errors. Omarchy remains unreachable. BaruchRio job 12/window
+344 remains settling at one of two peers with a 720-minute cap and no
+cloud run. Dev/Arik jobs 10/11 remain failed from their window timeouts;
+NAS dev, Arik, and memory-vault remain paused. Runner deadline failures
+are unchanged; no replacement pipeline or restart was initiated. No new
+actionable change or repeated notification this check.
+
+### Heartbeat 2026-09-12 22:14 UTC
+
+Mac dev is scanning with zero needed items/bytes/errors; other Mac folders
+and active NAS BaruchRio are idle with zero outstanding items/errors.
+Omarchy remains unreachable. BaruchRio job 12/window 344 remains settling
+at one of two peers with a 720-minute cap and no cloud run. Dev/Arik jobs
+10/11 remain failed from their window timeouts; NAS dev, Arik, and
+memory-vault remain paused. Runner deadline failures are unchanged; no
+replacement pipeline or restart was initiated. No new actionable change.
+
+### Heartbeat 2026-09-12 22:25 UTC
+
+Mac Arik/dev are scanning with zero needed items/bytes/errors; other Mac
+folders and active NAS BaruchRio are idle with zero outstanding items/
+errors. Omarchy remains unreachable. BaruchRio job 12/window 344 remains
+settling at one of two peers with a 720-minute cap and no cloud run.
+Dev/Arik jobs 10/11 remain failed from their window timeouts; NAS dev,
+Arik, and memory-vault remain paused. Runner deadline failures are unchanged;
+no replacement pipeline or restart was initiated. No new actionable change.
+
+### Heartbeat 2026-09-12 22:36 UTC
+
+Mac dev is scanning with 422 needed items / zero bytes/errors; other Mac
+folders and active NAS BaruchRio are idle with zero outstanding items/
+errors. Omarchy remains unreachable. BaruchRio job 12/window 344 remains
+settling at one of two peers with a 720-minute cap and no cloud run.
+Dev/Arik jobs 10/11 remain failed from their window timeouts; NAS dev,
+Arik, and memory-vault remain paused. Runner deadline failures are unchanged;
+no replacement pipeline or restart was initiated. No new actionable blocker.
