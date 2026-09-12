@@ -554,3 +554,13 @@ retry succeeded, showing scanning with 70 outstanding items and no errors.
 Other computer folders remain idle and current within their mesh. Existing
 windows 338/339 and three queued runners remain intact. Pending deployment
 and final cloud/return verification remain open; no duplicate work started.
+
+### Heartbeat 2026-09-12 06:24 UTC
+
+NAS Arik/dev remain idle with zero outstanding items and errors. PC
+transfers continue: Arik needs 9,285 files / 29.74 GB; dev needs 73,600
+files / 11.22 GB, with zero errors. Mac dev is scanning with 70 pending
+deletions, unchanged since the last retry; monitor these after its scan.
+All host reads succeeded this time. Other computer folders remain idle.
+Windows 338/339 retain their 720-minute caps and the three existing runners
+remain queued; no additional work or restart was initiated.
