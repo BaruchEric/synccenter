@@ -31,8 +31,6 @@ const MAX_MISSES = 5;
 const MIN_WINDOW_MS = 30_000;
 /** Consecutive caught-up polls required before the window closes. */
 const SETTLE_TICKS = 2;
-/** Peer completion is a float; 99.995 is Syncthing saying "done, roughly". */
-const PEER_DONE_AT = 99.99;
 
 /** One folder×member pair that syncs in windows instead of continuously. */
 export interface SyncJob {
@@ -47,7 +45,7 @@ export interface SyncJob {
 export class SyncWindowError extends Error {
   constructor(
     message: string,
-    public readonly code: "NOT_FOUND" | "NOT_A_MEMBER" | "REALTIME_MEMBER" | "ALREADY_OPEN",
+    public readonly code: "NOT_FOUND" | "NOT_A_MEMBER" | "REALTIME_MEMBER" | "ALREADY_OPEN" | "CLOUD_RUNNING",
   ) {
     super(message);
     this.name = "SyncWindowError";
@@ -120,14 +118,14 @@ export class SyncWindowEngine {
   start(): void {
     if (this.timers.length > 0) return;
     this.timers = [
-      setInterval(() => void this.tick(), this.intervalMs),
-      setInterval(() => void this.checkSchedules(), this.scheduleMs),
-      setInterval(() => void this.reconcile(), this.reconcileMs),
+      setInterval(() => void this.tick().catch((e) => this.log?.error("window", errorText(e))), this.intervalMs),
+      setInterval(() => void this.checkSchedules().catch((e) => this.log?.error("schedule", errorText(e))), this.scheduleMs),
+      setInterval(() => void this.reconcile().catch((e) => this.log?.error("reconcile", errorText(e))), this.reconcileMs),
     ];
     for (const t of this.timers) t.unref?.();
     // Held members must be paused from the first minutes of a boot, not the
     // first reconcile interval — a crashed window may have left one resumed.
-    void this.reconcile();
+    void this.reconcile().catch((e) => this.log?.error("reconcile", errorText(e)));
   }
 
   stop(): void {
@@ -178,7 +176,7 @@ export class SyncWindowEngine {
     via: WindowRow["via"],
     actor: string,
     source: WindowRow["source"],
-    opts: { jobId?: number } = {},
+    opts: { jobId?: number; allowRealtime?: boolean } = {},
   ): Promise<WindowRow> {
     let folder: FolderManifest;
     try {
@@ -190,7 +188,7 @@ export class SyncWindowEngine {
       throw new SyncWindowError(`${host} is not a member of folder ${folderName}`, "NOT_A_MEMBER");
     }
     const sync = effectiveSync(folder, host);
-    if (sync.mode === "realtime") {
+    if (sync.mode === "realtime" && !opts.allowRealtime) {
       throw new SyncWindowError(
         `${host} syncs ${folderName} in realtime — sync windows apply to scheduled/manual members`,
         "REALTIME_MEMBER",
@@ -198,6 +196,11 @@ export class SyncWindowEngine {
     }
     if (activeWindowFor(this.db, folderName, host)) {
       throw new SyncWindowError(`a window is already open for ${folderName} on ${host}`, "ALREADY_OPEN");
+    }
+    // Keep the cloud source stable throughout an upload. This applies to
+    // scheduled and manual opens; the post-cloud return opens after settlement.
+    if (this.db.query("SELECT id FROM runs WHERE folder = ? AND state = 'running' LIMIT 1").get(folderName)) {
+      throw new SyncWindowError(`cloud sync is still running for ${folderName}`, "CLOUD_RUNNING");
     }
 
     const jobId =
@@ -340,17 +343,22 @@ export class SyncWindowEngine {
 
     const state = String(status.state);
     const localDone =
-      state === "idle" && status.needBytes === 0 && status.needFiles === 0 && elapsed >= MIN_WINDOW_MS;
+      state === "idle" && status.needBytes === 0 && status.needFiles === 0 &&
+      (status.needTotalItems ?? 0) === 0 && (status.needDirectories ?? 0) === 0 &&
+      (status.needSymlinks ?? 0) === 0 && (status.needDeletes ?? 0) === 0 &&
+      status.errors === 0 && status.pullErrors === 0 && elapsed >= MIN_WINDOW_MS;
 
     // Peers only matter once this host has nothing left to pull: the point of
     // the window is also to let the OTHERS fetch what this host accumulated.
     let peersTotal = 0;
     let peersDone = 0;
+    let peersKnown = false;
     if (localDone) {
       try {
         ({ peersTotal, peersDone } = await this.peerCompletion(w.host, w.folder));
+        peersKnown = true;
       } catch {
-        // Peer accounting is best-effort; local done + settle still closes.
+        // Unknown peer state cannot establish convergence.
         peersTotal = 0;
         peersDone = 0;
       }
@@ -367,7 +375,7 @@ export class SyncWindowEngine {
       peersDone,
     });
 
-    const caughtUp = localDone && peersDone >= peersTotal;
+    const caughtUp = localDone && peersKnown && peersDone >= peersTotal;
     const settled = (this.settleCounts.get(w.id) ?? 0) + 1;
     if (caughtUp && settled >= SETTLE_TICKS) {
       this.close(w.id, "done", null);
@@ -390,15 +398,14 @@ export class SyncWindowEngine {
     const [config, conns] = await Promise.all([client.getFolder(folder), client.getConnections()]);
     const peers = config.devices
       .map((d) => d.deviceID)
-      .filter((id) => id !== myId)
-      .filter((id) => {
-        const c = conns.connections[id];
-        return c !== undefined && c.connected && !c.paused;
-      });
-    const completions = await Promise.all(peers.map((id) => client.getCompletion(folder, id)));
+      .filter((id) => id !== myId);
+    const connected = peers.filter((id) => conns.connections[id]?.connected && !conns.connections[id]?.paused);
+    const completions = await Promise.all(connected.map((id) => client.getCompletion(folder, id)));
     return {
       peersTotal: peers.length,
-      peersDone: completions.filter((c) => c.completion >= PEER_DONE_AT).length,
+      peersDone: completions.filter((c) => c.completion >= 100 && c.needBytes === 0 &&
+        c.needItems === 0 && c.needDeletes === 0 &&
+        (!c.remoteState || c.remoteState === "valid")).length,
     };
   }
 
@@ -410,10 +417,12 @@ export class SyncWindowEngine {
     this.settleCounts.delete(id);
     const row = finishWindow(this.db, id, state, error);
     if (!row) return;
+    const shouldPause = this.syncJobs().some((j) => j.folder === row.folder && j.host === row.host);
 
     // Pause fire-and-forget: the window is over either way, and a host that
     // cannot be paused right now is the reconciler's next customer.
     void (async () => {
+      if (!shouldPause) return;
       try {
         await this.registry.client(row.host).pauseFolder(row.folder);
       } catch (err) {
@@ -467,7 +476,7 @@ export class SyncWindowEngine {
     );
 
     this.announce(row);
-    this.bus.emit({ type: "folder", folder: row.folder, action: "paused" });
+    this.bus.emit({ type: "folder", folder: row.folder, action: shouldPause ? "paused" : "applied" });
     // After the window event, so a chain waiting on this window (Sync now)
     // has queued its cloud leg before the job is asked whether it is over.
     // Every job this window was a leg of, not just the one that opened it:

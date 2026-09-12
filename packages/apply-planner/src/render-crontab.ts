@@ -7,9 +7,14 @@ export function renderCrontab(plans: SchedulePlan[]): string {
     "# SchedulePlan → crontab fragment",
     "",
   ];
+  const emitted = new Set<string>();
   for (const p of plans) {
+    const key = `${p.folder}:${p.cron}`;
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    if (!/^[a-z][a-z0-9-]*$/.test(p.folder)) throw new Error("invalid folder name for scheduled sync");
     lines.push(`# ${p.folder}: ${p.anchor} ⇄ ${p.member}`);
-    lines.push(`${p.cron} ${p.command}`);
+    lines.push(`${p.cron} docker exec synccenter-api bun run scripts/scheduled-sync.ts ${p.folder}`);
   }
   return lines.join("\n") + "\n";
 }

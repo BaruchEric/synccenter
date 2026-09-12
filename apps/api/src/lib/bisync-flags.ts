@@ -93,7 +93,10 @@ export class BisyncFlagError extends Error {
 }
 
 export function planBisyncFlags(flags: readonly string[] = []): BisyncFlagPlan {
-  const params: Record<string, unknown> = {};
+  // rclone v1.75.1 rcBisync starts with zero-valued Options, whereas the
+  // CLI initializes MaxDelete to 50 (percent). Without this, even one valid
+  // deletion aborts RC runs. Keep the CLI safeguard and permit stricter policy.
+  const params: Record<string, unknown> = { maxDelete: 50 };
   const config: Record<string, unknown> = {};
   const warnings: string[] = [];
   const untranslatable: string[] = [];
@@ -107,6 +110,15 @@ export function planBisyncFlags(flags: readonly string[] = []): BisyncFlagPlan {
     const eq = flag.indexOf("=");
     const name = eq === -1 ? flag : flag.slice(0, eq);
     const value = eq === -1 ? undefined : flag.slice(eq + 1);
+
+    if (name === "--max-delete") {
+      if (value === undefined || !/^\d+$/.test(value) || Number(value) > 100) {
+        untranslatable.push(`${flag} (expects an integer percentage from 0 to 100)`);
+      } else {
+        params.maxDelete = Number(value);
+      }
+      continue;
+    }
 
     if (name in BOOL_PARAMS) {
       params[BOOL_PARAMS[name]!] = value === undefined ? true : value !== "false";

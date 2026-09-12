@@ -156,6 +156,7 @@ const COLUMN_INDEXES = [
 
 export function openDb(path: string): Db {
   const db = new Database(path);
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   for (const stmt of SCHEMA) db.exec(stmt);

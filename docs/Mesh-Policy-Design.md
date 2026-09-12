@@ -1,7 +1,10 @@
 # Mesh Policy Design — master policies, job templates, delegation, backup
 
-Status: **design + partial implementation** (2026-08-03). What exists today is
-marked ✅; everything else is a committed direction, not yet code.
+Status: **design + partial implementation** (original design 2026-08-03;
+node status refreshed from the 2026-09-11 review). Historical rollout notes
+below describe the original plan, not proof of current health. See the
+[sync-flow review and diagrams](Sync-Flow-Review.md) for live evidence,
+execution gaps, and the proposed full-cycle flow.
 
 ## 1. The mesh
 
@@ -11,17 +14,20 @@ Every member is a node; engines are an implementation detail per node:
 |---|---|---|---|
 | mac-studio | Syncthing (brew) | mesh-node | ✅ live |
 | qnap-ts453d | Syncthing (docker) + rclone rcd | **cloud-edge anchor** | ✅ live |
-| win-desktop | Syncthing (nssm) | mesh-node | ✅ enrolled |
-| gdrive (eric, SyncCenter-rooted) | rclone | cloud member | ✅ live |
+| win-desktop | Syncthing (nssm) | mesh-node | Configured device, disconnected; absent from live production folders |
+| omarchy | Syncthing (user systemd) | mesh-node | Enrolled September 11 over Tailscale; four folders, initial sync underway |
+| gdrive (eric, SyncCenter-rooted) | rclone | cloud member | Remote configured; no live production leg observed |
 | gdrive-arik (eric, My Drive root) | rclone | cloud member | ✅ live |
-| gdrive-baruchriollc | rclone | cloud member | ⏳ OAuth pending |
+| gdrive-baruchriollc | rclone | cloud member | ✅ baruchrio cloud run succeeded September 11 |
 | proxmox-01 | Syncthing (LXC) | mesh-node / backup brain | planned |
 | s3 / b2 bucket | rclone | **backup** member | planned |
 | usb-media (rotating disks) | rclone local + hotplug | **backup** member | planned |
 
-Live nodes exchange in real time over Syncthing; cloud/backup members hang off
-the anchor via scheduled rclone. A folder's `paths:` decides who participates —
-that is the whole membership model, and it already scales to n nodes.
+Live nodes exchange through Syncthing; the NAS uses scheduled windows for
+arik, dev, and baruchrio, while memory-vault is realtime. Cloud members hang
+off the anchor via scheduled rclone. A folder's `paths:` declares intended
+membership; actual device pairing and live folder configuration must also be
+verified. Tailscale reachability alone does not enroll a node.
 
 ## 2. Master policies (design)
 

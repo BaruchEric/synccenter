@@ -49,7 +49,7 @@ export class RunTracker {
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
   /** Set when a completed run still needs its apply_history row written. */
-  onFinished?: (run: RunRow) => void;
+  onFinished?: (run: RunRow) => void | Promise<void>;
 
   constructor({ db, bus, rclone, log, intervalMs = 1000 }: RunTrackerOpts) {
     this.db = db;
@@ -61,7 +61,7 @@ export class RunTracker {
 
   start(): void {
     if (this.timer || !this.rclone) return;
-    this.timer = setInterval(() => void this.tick(), this.intervalMs);
+    this.timer = setInterval(() => void this.tick().catch((e) => this.log?.error("bisync", errorText(e))), this.intervalMs);
     // Never hold the process open on our account.
     this.timer.unref?.();
   }
@@ -87,11 +87,11 @@ export class RunTracker {
 
   private async pollOne(run: RunRow): Promise<void> {
     if (Date.now() - new Date(run.started_at).getTime() > MAX_RUN_MS) {
-      this.settle(run.id, "failed", `gave up after ${MAX_RUN_MS / 3_600_000}h without finishing`);
+      await this.settle(run.id, "failed", `gave up after ${MAX_RUN_MS / 3_600_000}h without finishing`);
       return;
     }
     if (run.jobid == null) {
-      this.settle(run.id, "failed", "no rclone job id was recorded for this run");
+      await this.settle(run.id, "failed", "no rclone job id was recorded for this run");
       return;
     }
     const rclone = this.rclone!;
@@ -102,7 +102,7 @@ export class RunTracker {
     } catch (err) {
       const misses = recordMiss(this.db, run.id);
       if (misses >= MAX_MISSES) {
-        this.settle(run.id, "failed", `lost contact with rclone: ${errorText(err)}`);
+        await this.settle(run.id, "failed", `lost contact with rclone: ${errorText(err)}`);
       }
       return;
     }
@@ -131,7 +131,7 @@ export class RunTracker {
       // rclone reports failure two ways: `success: false` and a non-empty
       // `error`. Older builds have set one without the other, so trust either.
       const failed = status.success === false || !!status.error;
-      this.settle(run.id, failed ? "failed" : "done", status.error || null);
+      await this.settle(run.id, failed ? "failed" : "done", status.error || null);
       return;
     }
 
@@ -139,7 +139,7 @@ export class RunTracker {
     if (fresh) this.bus.emit({ type: "run", run: toView(fresh) });
   }
 
-  private settle(id: number, state: "done" | "failed" | "stopped", error: string | null): void {
+  private async settle(id: number, state: "done" | "failed" | "stopped", error: string | null): Promise<void> {
     const row = finishRun(this.db, id, state, error);
     if (!row) return;
     this.bus.emit({ type: "run", run: toView(row) });
@@ -168,7 +168,7 @@ export class RunTracker {
         resync: row.resync === 1,
       },
     });
-    this.onFinished?.(row);
+    await this.onFinished?.(row);
     settleAndAnnounce(this.db, this.bus, row.job_id);
   }
 }

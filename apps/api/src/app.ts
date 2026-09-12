@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import { RcloneClient } from "@synccenter/adapters";
+import { effectiveSync, loadAllHosts, resolveBisyncAnchor } from "@synccenter/apply-planner";
 import { version as PKG_VERSION } from "../package.json" with { type: "json" };
 import { bearerAuth } from "./auth.ts";
 
@@ -16,7 +17,8 @@ import type { ApiConfig } from "./config.ts";
 import { openDb, type Db } from "./db.ts";
 import { startBisync } from "./lib/bisync-service.ts";
 import { EventBus } from "./lib/bus.ts";
-import { abandonStaleJobs } from "./lib/jobs-service.ts";
+import { abandonStaleJobs, failJobLeg, setJobOpening } from "./lib/jobs-service.ts";
+import { parseFolderByName } from "./lib/fs.ts";
 import { Log } from "./lib/log.ts";
 import { RunTracker } from "./lib/run-tracker.ts";
 import { abandonStaleRuns } from "./lib/runs-service.ts";
@@ -123,7 +125,7 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch, logStdout }
     bisync: (folder, opts) =>
       startBisync({ cfg, db: database, registry: reg, rclone: rcloneClient, bus, log }, folder, opts),
   });
-  tracker.onFinished = (run) => {
+  tracker.onFinished = async (run) => {
     database.run(
       `INSERT INTO apply_history (ts, actor, source, target_kind, target_name, payload_hash, result, note)
        VALUES (?, ?, ?, 'folder', ?, 'bisync', ?, ?)`,
@@ -139,6 +141,28 @@ export function buildApp({ cfg, db, registry, rclone, importerFetch, logStdout }
       ],
     );
     bus.emit({ type: "folder", folder: run.folder, action: "applied" });
+    if (run.state !== "done" || run.dry_run || !run.job_id) return;
+    // Wait for all cloud legs before opening the return mesh window.
+    const unfinished = database.query("SELECT id FROM runs WHERE job_id = ? AND state = 'running'").get(run.job_id);
+    if (unfinished) return;
+    setJobOpening(database, run.job_id, true);
+    try {
+      const folder = parseFolderByName(cfg.foldersDir, run.folder);
+      if (!folder) throw new Error("folder manifest missing after cloud sync");
+      const held = Object.keys(folder.paths).filter((h) => !reg.isRclone(h) && effectiveSync(folder, h).mode !== "realtime");
+      const targets = held.length ? held : [resolveBisyncAnchor(folder, loadAllHosts(cfg.hostsDir)).name];
+      for (const host of targets) {
+        try {
+          await engine.open(run.folder, host, "manual", run.actor, run.source, { jobId: run.job_id, allowRealtime: true });
+        } catch (err) {
+          failJobLeg(database, run.job_id, `return mesh on ${host}: ${String(err)}`);
+        }
+      }
+    } catch (err) {
+      failJobLeg(database, run.job_id, `return mesh: ${String(err)}`);
+    } finally {
+      setJobOpening(database, run.job_id, false);
+    }
   };
 
   const app = express();

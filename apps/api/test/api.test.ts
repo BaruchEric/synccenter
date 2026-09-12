@@ -594,6 +594,55 @@ describe("legacy / stubbed", () => {
 });
 
 describe("rclone routes", () => {
+  it("extends a running recovery window through the API with a bounded cap", async () => {
+    const out = await (await call("/folders/held-cloud/sync?cloud=false", { method: "POST" })).json() as { windows: Array<{ id: number }> };
+    const id = out.windows[0]!.id;
+    const extend = (maxMinutes: number) => call(`/windows/${id}/extend`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ maxMinutes }),
+    });
+    expect((await extend(721)).status).toBe(400);
+    const r = await extend(720);
+    expect(r.status).toBe(200);
+    expect((await r.json() as { window: { max_minutes: number } }).window.max_minutes).toBe(720);
+    await call(`/windows/${id}/stop`, { method: "POST" });
+    expect((await extend(720)).status).toBe(409);
+  });
+  it("opens a tracked return window after cloud success", async () => {
+    mkdirSync(join(configDir, "compiled", "base-binaries"), { recursive: true });
+    writeFileSync(join(configDir, "compiled", "base-binaries", "filter.rclone"), "- .DS_Store\n+ **\n");
+    const r = await call("/folders/held-cloud/bisync?async=true", { method: "POST" });
+    expect(r.status).toBe(200);
+    await tracker.tick();
+    const result = await (await call("/windows?folder=held-cloud")).json() as { windows: Array<{ state: string }> };
+    expect(result.windows[0]?.state).toBe("running");
+    expect(qnapFake.calls.some((c) => c.method === "resumeFolder" && c.args[0] === "held-cloud")).toBe(true);
+    // Close this test's window so it cannot affect subsequent API tests.
+    const windows = await (await call("/windows?folder=held-cloud")).json() as { windows: Array<{ id: number; state: string }> };
+    for (const w of windows.windows.filter((w) => w.state === "running")) {
+      await call(`/windows/${w.id}/stop`, { method: "POST" });
+    }
+    rmSync(join(configDir, "compiled", "base-binaries", "filter.rclone"));
+  });
+
+  it("manual bisync resolves member overrides and unified conflict policy", async () => {
+    const file = join(configDir, "folders", "shared.yaml");
+    const original = readFileSync(file, "utf8");
+    const filter = join(configDir, "compiled", "base-binaries", "filter.rclone");
+    mkdirSync(join(configDir, "compiled", "base-binaries"), { recursive: true });
+    writeFileSync(filter, "- .DS_Store\n+ **\n");
+    try {
+      writeFileSync(file, original + '\nconflict:\n  policy: older\noverrides:\n  gdrive:\n    bisync:\n      flags:\n        - --max-lock=5m\n        - --conflict-resolve=newer\n');
+      const r = await call("/folders/shared/bisync?async=true&dryRun=true", { method: "POST" });
+      expect(r.status).toBe(200);
+      const args = rcloneFake.calls.find((c) => c.method === "bisync")!.args[0] as { extra: Record<string, unknown> };
+      expect(args.extra).toMatchObject({ maxLock: "5m", conflictResolve: "older", conflictLoser: "pathname" });
+      expect(args.extra.workdir).toBe(join(configDir, "compiled", "bisync-workdir"));
+      await tracker.tick();
+    } finally {
+      writeFileSync(file, original);
+      rmSync(filter);
+    }
+  });
   it("GET /rclone/version proxies to rclone client", async () => {
     const r = await call("/rclone/version");
     expect(r.status).toBe(200);
@@ -1241,7 +1290,7 @@ describe("GET /jobs — every leg under one id", () => {
     }
   });
 
-  it("a Sync now on a cloud-only folder is one job that settles with the run's numbers", async () => {
+  it("a realtime folder keeps its job running until the cloud return window completes", async () => {
     rcloneFake.nextJobStatus = { finished: false };
     const started = (await (await call("/folders/shared/sync", { method: "POST" })).json()) as {
       job: { id: number; kind: string; state: string; runs: Array<{ id: number; job_id: number }> };
@@ -1269,12 +1318,11 @@ describe("GET /jobs — every leg under one id", () => {
         totals: { bytes: number; transfers: number; checks: number; legs: number; legsDone: number; seconds: number };
       };
     };
-    expect(job.state).toBe("done");
-    expect(job.finished_at).not.toBeNull();
+    expect(job.state).toBe("running");
+    expect(job.finished_at).toBeNull();
     expect(job.runs[0]!.state).toBe("done");
-    expect(job.totals).toMatchObject({ bytes: 2048, transfers: 2, checks: 9, legs: 1, legsDone: 1 });
-    // The bus said so too, once, when it closed.
-    expect(seen).toEqual([{ id: started.job.id, state: "done" }]);
+    expect(job.totals).toMatchObject({ bytes: 2048, transfers: 2, checks: 9, legs: 2, legsDone: 1 });
+    expect(seen.some((j) => j.id === started.job.id && j.state === "done")).toBe(false);
 
     const list = (await (await call("/jobs?folder=shared&kind=bisync&limit=1")).json()) as {
       jobs: Array<{ id: number; folder: string; kind: string }>;
@@ -1284,7 +1332,7 @@ describe("GET /jobs — every leg under one id", () => {
     expect(list.jobs[0]!.id).toBe(started.job.id);
     expect(list.jobs.every((j) => j.folder === "shared" && j.kind === "bisync")).toBe(true);
     expect(list.nextBefore).toBe(started.job.id);
-    expect((await (await call("/jobs?state=running")).json() as { jobs: unknown[] }).jobs).toEqual([]);
+    await call(`/jobs/${started.job.id}/stop`, { method: "POST" });
   });
 
   it("stopping a job closes its window and drops the queued cloud leg", async () => {

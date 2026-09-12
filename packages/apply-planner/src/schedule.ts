@@ -24,21 +24,10 @@ export function buildSchedulePlan(
   if (!memberPath) return [];
 
   const remotePath = `${member.remote}:${memberPath}`;
-  const conflictFlags = mapPolicy(folder.conflict?.policy).rcloneFlags;
-  const userFlags = memberOverride.flags ?? folder.bisync?.flags ?? [];
-
-  // Strip any user-supplied --conflict-* flags so the unified policy wins,
-  // unless the user explicitly opted out via conflict.policy missing AND raw flags present.
-  const userConflict = userFlags.some((f) => f.startsWith("--conflict-"));
-  const useUnified = folder.conflict?.policy !== undefined || !userConflict;
-  const effectiveFlags = useUnified
-    ? [...userFlags.filter((f) => !f.startsWith("--conflict-")), ...conflictFlags]
-    : userFlags;
+  const effectiveFlags = effectiveBisyncFlags(folder, member.name);
 
   const cmd = [
     "docker", "exec", "rclone-rcd",
-    // The rcd daemon gets --config on its own command line; a plain `docker
-    // exec rclone` does not inherit it, so spell it out here too.
     "rclone", "--config=/config/rclone.conf", "bisync",
     localPath,
     remotePath,
@@ -47,14 +36,23 @@ export function buildSchedulePlan(
     ...effectiveFlags,
   ].join(" ");
 
-  return [{
-    anchor: anchor.name as HostName,
-    member: member.name as HostName,
-    folder: folder.name,
-    cron: schedule,
-    command: cmd,
-    filtersFile,
-  }];
+  return [{ anchor: anchor.name as HostName, member: member.name as HostName,
+    folder: folder.name, cron: schedule, command: cmd, filtersFile }];
+}
+
+/** Resolve the same policy for scheduled CLI and manual RC execution. */
+export function effectiveBisyncFlags(folder: Pick<FolderManifest, "bisync" | "conflict" | "overrides">, member: string): string[] {
+  const conflictFlags = mapPolicy(folder.conflict?.policy).rcloneFlags;
+  const userFlags = folder.overrides?.[member]?.bisync?.flags ?? folder.bisync?.flags ?? [];
+
+  // Strip any user-supplied --conflict-* flags so the unified policy wins,
+  // unless the user explicitly opted out via conflict.policy missing AND raw flags present.
+  const userConflict = userFlags.some((f) => f.startsWith("--conflict-"));
+  const useUnified = folder.conflict?.policy !== undefined || !userConflict;
+  return useUnified
+    ? [...userFlags.filter((f) => !f.startsWith("--conflict-")), ...conflictFlags]
+    : userFlags;
+
 }
 
 /**

@@ -12,6 +12,14 @@ import { planBisyncFlags } from "../src/lib/bisync-flags.ts";
  * would silently rot: that the code still generates exactly that call.
  */
 describe("the on-demand bisync request", () => {
+  it("preserves the CLI deletion limit and explicit stricter limits", () => {
+    expect(planBisyncFlags().params.maxDelete).toBe(50);
+    expect(planBisyncFlags(["--max-delete=0"]).params.maxDelete).toBe(0);
+    expect(planBisyncFlags(["--max-delete=5"]).params.maxDelete).toBe(5);
+    for (const invalid of ["", "-1", "101", "1.5", "abc"]) {
+      expect(() => planBisyncFlags([`--max-delete=${invalid}`])).toThrow();
+    }
+  });
   /** baruchrio's real manifest flags. */
   const FLAGS = [
     "--resilient",
@@ -55,6 +63,7 @@ describe("the on-demand bisync request", () => {
       _group: "sc/bisync/baruchrio/abcd1234",
       _async: true,
       dryRun: true,
+      maxDelete: 50,
       resilient: true,
       recover: true,
       maxLock: "2m",

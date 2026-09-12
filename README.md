@@ -17,6 +17,27 @@ SyncCenter is the single control plane over two sync mechanisms — a Syncthing 
 
 Policy is authored as YAML in the sibling repo `../synccenter-config` (folders, rulesets, host manifests, schedules, SOPS-sealed secrets) and is the single source of truth. SyncCenter reads that repo, compiles each ruleset into engine-specific artifacts (`.stignore` for Syncthing, `filter.rclone` for rclone), and applies them to live hosts — recording every apply in a SQLite history table. UI and CLI edits commit back to the config repo, keeping the repo and live state in lockstep.
 
+## Sync topology and operational review
+
+The [September 11 sync-flow review](docs/Sync-Flow-Review.md) documents the
+observed topology, folder paths, live failures, execution diagrams, and
+proposed PC/NAS/cloud flow. Later that day, [Omarchy was enrolled](docs/runbooks/omarchy-node.md)
+over Tailscale in all four production folders; initial sync is in progress.
+Additional clouds remain unconfigured. Cloud job success does not establish
+end-to-end mesh freshness.
+
+```mermaid
+flowchart LR
+    Mac["Mac"] <-->|"Syncthing: LAN observed"| NAS["QNAP NAS"]
+    PC["Omarchy PC"] <-->|"Syncthing over Tailscale"| NAS
+    NAS <-->|"Scheduled rclone bisync"| Drive["Google Drive"]
+    NAS -.->|"Not configured"| Cloud["Other clouds"]
+```
+
+See the [sync-window runbook](docs/runbooks/scheduled-sync.md) for current
+trigger behavior and the [mesh policy design](docs/Mesh-Policy-Design.md)
+for proposed policy and backup extensions.
+
 ## Repository layout
 
 ```

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { RcloneClient, RcloneError } from "@synccenter/adapters";
 import {
   bisyncWorkdirFor,
+  effectiveBisyncFlags,
   loadAllHosts,
   PlanError,
   resolveBisyncAnchor,
@@ -141,7 +142,7 @@ export async function startBisync(
   // wearing the same name.
   let flagPlan;
   try {
-    flagPlan = planBisyncFlags(m.bisync?.flags);
+    flagPlan = planBisyncFlags(effectiveBisyncFlags(m, memberName));
   } catch (err) {
     if (err instanceof BisyncFlagError) {
       throw new BisyncStartError(err.message, 400, {

@@ -60,7 +60,7 @@
       "properties": {
         "install_method": {
           "type": "string",
-          "enum": ["brew", "docker", "qpkg", "synctrayzor", "winget+nssm"]
+          "enum": ["brew", "docker", "qpkg", "synctrayzor", "winget+nssm", "user-systemd"]
         },
         "binary_path": {
           "type": "string",

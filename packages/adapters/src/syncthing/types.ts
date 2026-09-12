@@ -77,6 +77,10 @@ export interface SyncthingFolderStatus {
   inSyncBytes: number;
   needBytes: number;
   needFiles: number;
+  needDirectories?: number;
+  needSymlinks?: number;
+  needDeletes?: number;
+  needTotalItems?: number;
   errors: number;
   pullErrors: number;
   sequence: number;

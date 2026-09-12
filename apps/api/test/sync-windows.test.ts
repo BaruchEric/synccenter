@@ -10,6 +10,7 @@ import { HostRegistry } from "../src/registry.ts";
 import { SyncWindowEngine } from "../src/lib/sync-windows.ts";
 import { activeWindowFor, getWindow, listWindows } from "../src/lib/windows-service.ts";
 import { firesBetween } from "../src/lib/cron-times.ts";
+import { startRun } from "../src/lib/runs-service.ts";
 import { FakeDaemon } from "./helpers/fake-daemon.ts";
 
 const TOKEN = "test-token-of-sufficient-length-1234567890";
@@ -109,6 +110,52 @@ const advance = (ms: number) => {
 };
 
 describe("SyncWindowEngine", () => {
+  it("keeps a held source paused when its schedule fires during cloud upload", async () => {
+    const run = startRun(db, { folder: "held", actor: "tester", source: "api" });
+    advance(31 * 60_000);
+    await engine.checkSchedules();
+    expect(activeWindowFor(db, "held", "qnap-ts453d")).toBeNull();
+    expect(qnap.calls).not.toContain("resumeFolder:held");
+    await expect(engine.open("held", "qnap-ts453d", "manual", "tester", "api")).rejects.toMatchObject({ code: "CLOUD_RUNNING" });
+    db.run("UPDATE runs SET state = 'done' WHERE id = ?", [run.id]);
+    const returned = await engine.open("held", "qnap-ts453d", "manual", "tester", "api");
+    expect(returned.state).toBe("running");
+    expect(qnap.calls).toContain("resumeFolder:held");
+  });
+  it("tracks a realtime return window without pausing realtime sync on completion", async () => {
+    const row = await engine.open("live", "qnap-ts453d", "manual", "tester", "api", { allowRealtime: true });
+    advance(31_000);
+    await tick(); await tick();
+    expect(getWindow(db, row.id)!.state).toBe("done");
+    expect(qnap.calls).not.toContain("pauseFolder:live");
+  });
+  for (const field of ["needDeletes", "needDirectories", "needSymlinks", "needTotalItems", "errors", "pullErrors"]) {
+    it(`does not finish with outstanding ${field} and zero needed bytes`, async () => {
+      const original = qnap.getFolderStatus.bind(qnap);
+      qnap.getFolderStatus = async (id) => ({ ...await original(id), [field]: 1 });
+      const row = await engine.open("held", "qnap-ts453d", "manual", "tester", "api");
+      advance(31_000);
+      await tick(); await tick();
+      expect(getWindow(db, row.id)!.state).toBe("running");
+    });
+  }
+
+  it("does not finish when a configured peer is offline", async () => {
+    qnap.peerConnected = false;
+    const row = await engine.open("held", "qnap-ts453d", "manual", "tester", "api");
+    advance(31_000);
+    await tick(); await tick();
+    expect(getWindow(db, row.id)!.state).toBe("running");
+    expect(getWindow(db, row.id)!.peers_total).toBe(1);
+  });
+
+  it("does not finish when peer accounting fails", async () => {
+    qnap.getConnections = async () => { throw new Error("offline"); };
+    const row = await engine.open("held", "qnap-ts453d", "manual", "tester", "api");
+    advance(31_000);
+    await tick(); await tick();
+    expect(getWindow(db, row.id)!.state).toBe("running");
+  });
   it("lists only scheduled/manual members as sync jobs", () => {
     const jobs = engine.syncJobs();
     expect(jobs).toEqual([

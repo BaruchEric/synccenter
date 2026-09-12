@@ -106,7 +106,7 @@ export interface SyncthingHostManifest {
   role: "mesh-node" | "hub" | "cloud-edge";
   ssh?: { user: string; port?: number; key_ref?: string; host?: string };
   syncthing: {
-    install_method: "brew" | "docker" | "qpkg" | "synctrayzor" | "winget+nssm";
+    install_method: "brew" | "docker" | "qpkg" | "synctrayzor" | "winget+nssm" | "user-systemd";
     api_url: string;
     api_key_ref: string;
     device_id_ref: string;

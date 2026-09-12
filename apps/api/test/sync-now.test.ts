@@ -261,16 +261,15 @@ describe("SyncNow", () => {
     expect(warn?.message).toContain("closed by hand");
   });
 
-  it("still runs the cloud leg after a window that closed at its cap", async () => {
+  it("blocks the cloud leg after a window that closed at its cap", async () => {
     const out = await syncNow.run("cloudy", who);
     qnap.state = "syncing";
     qnap.needBytes = 999;
     advance(46 * 60_000);
     await tick();
     expect(getWindow(db, out.windows[0]!.id)!.state).toBe("timeout");
-    // A partial catch-up is still worth pushing to Drive — that is what the
-    // nightly cron does every night regardless.
-    expect(bisyncCalls).toHaveLength(1);
+    expect(bisyncCalls).toHaveLength(0);
+    expect(job(out.job.id).state).toBe("failed");
   });
 
   it("goes straight to the bisync when no member is held", async () => {
@@ -342,12 +341,12 @@ describe("SyncNow", () => {
     expect(history[1]!.note).toContain("rclone is not configured");
   });
 
-  it("with ?host= on a realtime member, reports the failure and still runs the cloud leg", async () => {
+  it("with ?host= on a realtime member, reports the failure and blocks cloud", async () => {
     const out = await syncNow.run("cloudy", { ...who, host: "mac-studio" });
     expect(out.windows).toEqual([]);
     expect(out.failed).toEqual([{ host: "mac-studio", error: expect.stringContaining("realtime") }]);
     expect(out.cloud?.status).toBe("started");
-    expect(bisyncCalls).toHaveLength(1);
+    expect(bisyncCalls).toHaveLength(0);
   });
 
   it("with ?host= on a realtime member and no cloud leg, fails the way the old route did", async () => {
@@ -357,15 +356,14 @@ describe("SyncNow", () => {
     });
   });
 
-  it("runs the cloud leg when the window could not even open", async () => {
+  it("blocks the cloud leg when the window could not even open", async () => {
     qnap.failResume = new Error("connection refused");
     const out = await syncNow.run("cloudy", who);
     // open() returns the failed row rather than throwing.
     expect(out.windows[0]!.state).toBe("failed");
-    // No running window to wait for, so the cloud leg goes now: the NAS may
-    // be behind the Mac, but Drive being behind the NAS is a separate leg.
+    // A failed resume cannot establish a usable NAS baseline.
     expect(out.cloud?.status).toBe("started");
-    expect(bisyncCalls).toHaveLength(1);
+    expect(bisyncCalls).toHaveLength(0);
   });
 });
 
@@ -416,17 +414,16 @@ describe("jobs — every leg under one id", () => {
     expect(j.runs).toEqual([]);
   });
 
-  it("a window at its cap and a bisync that ran is a partial job", async () => {
+  it("a window at its cap blocks cloud and fails the job", async () => {
     const out = await syncNow.run("cloudy", who);
     qnap.state = "syncing";
     qnap.needBytes = 999;
     advance(46 * 60_000);
     await tick();
     const runs = listRunsForJobs(db, [out.job.id]);
-    expect(runs).toHaveLength(1);
-    endRun(runs[0]!.id);
-    expect(job(out.job.id).state).toBe("partial");
-    expect(job(out.job.id).totals.legsFailed).toBe(1);
+    expect(runs).toHaveLength(0);
+    expect(job(out.job.id).state).toBe("failed");
+    expect(job(out.job.id).totals.legsFailed).toBe(2);
   });
 
   it("no held member: a bisync job; cloud: false: a window job", async () => {

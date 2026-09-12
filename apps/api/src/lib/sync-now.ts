@@ -333,6 +333,10 @@ export class SyncNow {
       timer = setTimeout(
         () => {
           if (done) return;
+          if (waiting.some((id) => {
+            const w = getWindow(db, id);
+            return w?.state === "running" && Date.now() < new Date(w.started_at).getTime() + (w.max_minutes + 5) * 60_000;
+          })) { arm(); return; }
           finish();
           log.warn("sync", `cloud leg abandoned: window${pending.size > 1 ? "s" : ""} #${[...pending].join(", #")} never reported closing`, {
             folder,
@@ -390,6 +394,35 @@ export class SyncNow {
     const { db, bus, log } = this.deps;
     const runs: RunView[] = [];
     const errors: Array<{ member: string; error: string }> = [];
+    const job = getJob(db, jobId);
+    const own = db.query("SELECT * FROM sync_windows WHERE job_id = ?").all(jobId) as WindowRow[];
+    const adopted = (JSON.parse(job?.after ?? "[]") as number[]).map((id) => getWindow(db, id));
+    let blocked = !job || job.legs_failed > 0 || [...own, ...adopted].some((w) => !w || w.state !== "done");
+    const manifest = parseFolderByName(this.deps.cfg.foldersDir, folder);
+    // Realtime members have no window row. Check their actual state too.
+    if (!manifest) blocked = true;
+    if (!blocked && manifest) {
+      for (const host of Object.keys(manifest.paths)) {
+        if (this.deps.registry.isRclone(host) || effectiveSync(manifest, host).mode !== "realtime") continue;
+        try {
+          const s = await this.deps.registry.client(host).getFolderStatus(folder);
+          if (s.state !== "idle" || s.needBytes !== 0 || s.needFiles !== 0 || s.errors !== 0 ||
+            s.pullErrors !== 0 || (s.needTotalItems ?? 0) !== 0 || (s.needDeletes ?? 0) !== 0 ||
+            (s.needDirectories ?? 0) !== 0 || (s.needSymlinks ?? 0) !== 0 || s.sequence === 0) blocked = true;
+        } catch { blocked = true; }
+      }
+    }
+    if (blocked) {
+      const error = "cloud leg blocked: required mesh members did not complete successfully";
+      for (const member of members) {
+        errors.push({ member, error });
+        failJobLeg(db, jobId, `bisync → ${member}: ${error}`);
+      }
+      log.warn("sync", error, { folder, data: { jobId } });
+      setCloudPending(db, jobId, false);
+      settleAndAnnounce(db, bus, jobId);
+      return { status: "started", members, runs, errors };
+    }
     for (const member of members) {
       try {
         const started = await this.deps.bisync(folder, {

@@ -46,6 +46,7 @@ services:
       SC_HOST_API_KEY_QNAP_TS453D: ${SC_HOST_API_KEY_QNAP_TS453D}
       SC_HOST_API_KEY_MAC_STUDIO: ${SC_HOST_API_KEY_MAC_STUDIO}
       SC_HOST_API_KEY_WIN_DESKTOP: ${SC_HOST_API_KEY_WIN_DESKTOP}
+      SC_HOST_API_KEY_OMARCHY: ${SC_HOST_API_KEY_OMARCHY}
     networks: [edge, internal]
     labels:
       - "traefik.enable=true"

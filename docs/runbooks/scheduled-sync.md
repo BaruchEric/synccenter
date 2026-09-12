@@ -1,5 +1,37 @@
 # Scheduled sync (sync windows)
 
+## Recovery update — September 11, 2026
+
+The deployed controller now blocks cloud work after incomplete mesh windows,
+counts deletion/error backlogs, and keeps a tracked return window open after
+cloud success. Realtime anchors remain unpaused when that return window ends.
+Required offline peers prevent a successful completion result.
+
+QNAP's four cloud cron entries now run `scripts/scheduled-sync.ts` inside
+`synccenter-api`. The runner serializes scheduled jobs, waits for existing
+tracked work, invokes `/folders/:name/sync`, and follows the resulting job
+through its return leg. The generated `/schedule/crontab` uses this runner too.
+Both overlapping Drive dedupe cron entries are paused until maintenance can
+use the same serialization. Logs are in the persistent state directory:
+`scheduled-sync.log` and, for this recovery, `recovery-pipeline.log`.
+
+For initial replication, open `/folders/:name/sync?cloud=false`, then extend
+its running window with `POST /windows/:id/extend` and JSON
+`{"maxMinutes":720}`. The cap is measured from the original start time; the
+endpoint cannot shorten a window or extend a closed one. This changes only
+that window, not the normal schedule. Use the API rather than a concurrent
+SQLite writer. The controller now waits up to five seconds on SQLite locks
+and catches background poll failures instead of terminating.
+
+Mac and Omarchy are also paired directly over Tailscale for all four folders.
+PC-to-PC replication can therefore continue while the NAS rests between
+windows. NAS remains the Drive anchor. See the recovery record for current
+verification; the historical discussion below predates these corrections.
+
+For the dated live topology, backlog evidence, and proposed full-cycle flow,
+see the [September 11 review](../Sync-Flow-Review.md). This runbook describes
+the local implementation; live deployment parity must be verified separately.
+
 Why this exists: the QNAP was pinning its CPU on continuous Syncthing work —
 the fs-watcher, rescans, and delete-retry churn never let it rest. A member
 that does not need instant propagation can sync in **windows** instead: the
@@ -36,13 +68,18 @@ The engine lives inside the API server (`SyncWindowEngine`, started in
 1. sweeps the cron expressions every 15 s and opens windows that came due;
 2. polls open windows every 2 s (`db/status`, then per-peer `db/completion`
    once the local side is caught up) and streams progress over `/events`;
-3. closes a window when the folder is idle with nothing needed locally and
-   every *connected* peer reports 100 % — after a 30 s minimum and two
+3. closes a window when the folder is idle with zero needed bytes/files and
+   every *connected* peer reports at least 99.99 % — after a 30 s minimum and two
    consecutive settled polls — or at `max_window_minutes`, whichever first;
 4. re-pauses the folder on close, whatever the reason for closing;
 5. reconciles every 5 min (and at boot, and after every apply): any held
    member with no open window is paused. A crash mid-window cannot leave the
    folder running.
+
+The current completion predicate does not require zero needed deletions or
+errors. Offline peers are not counted; if peer accounting fails, local
+completion can close the window. A `done` window therefore does not prove
+every configured member is fully converged.
 
 ## Driving it
 
@@ -63,8 +100,13 @@ NAS. Sync now chains them, in that order:
 
 1. a window opens on every held member (`?host=` narrows it to one);
 2. when the last of those windows closes, the API runs the bisync to every
-   rclone member of the folder — the same flags and filter as the crontab leg;
+   rclone member of the folder using its compiled filter;
 3. a folder with no held member goes straight to step 2.
+
+Manual and cron configuration are not yet fully equivalent: cron resolves
+`conflict.policy` and per-member bisync overrides, while the manual trigger
+currently translates only folder-level `bisync.flags`. See the
+[review findings](../Sync-Flow-Review.md#3-manual-and-scheduled-cloud-policy-differ).
 
 A window closed **by hand** (Close window / `POST /windows/<id>/stop`) cancels
 the queued cloud leg — stopping is the operator saying "not now". A window
@@ -72,6 +114,22 @@ that hits its cap (`timeout`) does not: a partial catch-up is still pushed to
 Drive, exactly as the nightly cron would. A cloud leg that cannot start (no
 `SC_RCLONE_URL`, missing compiled filter, rcd error) lands in the ledger as an
 error row and in the log, so a missing bisync is visible rather than silent.
+
+A failed window also permits the cloud leg to run. Nightly QNAP cloud cron
+is independent of the API window scheduler and does not wait for a clean
+window. Cloud changes reach held mesh members only after a subsequent
+Syncthing scan/window; the current chain does not wait for that return leg.
+
+```mermaid
+flowchart LR
+    Start["Sync now"] --> Window["Open or adopt mesh windows"]
+    Window --> Result{"Window result"}
+    Result -->|"Done / timeout / failed"| Cloud["Cloud bisync"]
+    Result -->|"Operator stopped"| Skip["Skip cloud"]
+    Cron["Independent QNAP cron"] --> Direct["Cloud bisync plus file log"]
+```
+
+Folders without held members go directly to cloud bisync.
 
 The wait is in-memory: an API restart mid-window abandons the window and the
 queued leg with it (the boot log line says how many). Pressing Sync now again
@@ -81,6 +139,11 @@ queue a second bisync.
 Where to look afterwards: **Logs** shows each step as it happens (window
 opened, cloud leg queued, bisync started, bisync done), **History** shows the
 finished rows with their numbers.
+
+Direct QNAP cron runs bypass this API ledger. Inspect the rclone container's
+`/config/logs/<folder>-bisync.log` as well; on the reviewed NAS that maps to
+`/share/Container/synccenter/rclone-config/logs/`. The September 11 snapshot
+had fresh cron successes but no API run newer than August 25.
 
 ### Every leg is one job
 
