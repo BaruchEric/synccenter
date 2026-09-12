@@ -564,3 +564,121 @@ deletions, unchanged since the last retry; monitor these after its scan.
 All host reads succeeded this time. Other computer folders remain idle.
 Windows 338/339 retain their 720-minute caps and the three existing runners
 remain queued; no additional work or restart was initiated.
+
+### Heartbeat 2026-09-12 06:36 UTC
+
+PC transfers remain error-free: Arik needs 9,126 files / 29.36 GB, and
+dev needs 70,925 files / 11.16 GB. NAS Arik/dev remain idle with zero
+outstanding items/errors. Mac dev is still scanning with 70 pending
+deletions; other computer folders remain idle and current in the mesh.
+Windows 338/339 retain their 720-minute caps and the same three cloud
+runners remain queued. No intervention or duplicate work was needed.
+The user's push request was completed before this heartbeat; this entry
+is a subsequent operational update, not an unpushed implementation change.
+
+### Heartbeat 2026-09-12 06:47 UTC
+
+PC backlogs continue decreasing: Arik 8,995 files / 29.02 GB; dev 69,238
+files / 11.13 GB. Dev is currently sync-preparing after transferring more
+files. All reported errors remain zero. NAS Arik/dev stay idle and caught
+up; Mac dev is scanning with 70 pending deletions and 419 other items.
+Other computer folders are idle. Existing recovery windows/caps and three
+queued runners remain unchanged. No intervention or duplicate work needed.
+
+### Heartbeat 2026-09-12 06:57 UTC
+
+PC transfers continue with zero errors: Arik needs 8,880 files / 28.70 GB;
+dev needs 67,722 files / 11.04 GB. Dev's non-file backlog also decreased
+substantially, leaving 68,109 total items. NAS Arik/dev remain idle with
+zero outstanding items. Mac dev is scanning with 70 pending deletions
+and 432 other items, still without errors. Other computer folders are
+idle. Windows 338/339 and existing queued runners remain unchanged; no
+intervention or duplicate work was needed this check.
+
+### Heartbeat 2026-09-12 07:08 UTC
+
+Mac dev's scan and pending deletions have cleared: both Mac and NAS are
+idle with zero outstanding items/errors for dev and Arik. PC Arik needs
+8,739 files / 28.37 GB; PC dev needs 66,345 files / 10.13 GB plus 21
+deletions. All reported errors remain zero. Other computer folders remain
+idle. Existing recovery windows/caps and three queued cloud runners remain
+unchanged. No retries, restarts, or duplicate work were necessary.
+
+### Heartbeat 2026-09-12 07:19 UTC
+
+Transfer pace increased substantially: PC dev needFiles fell from 66,345
+to 3,945, and needed bytes fell from 10.13 GB to 5.13 GB. PC Arik now
+needs 7,005 files / 22.65 GB, down from 8,739 files / 28.37 GB. Roughly
+10.72 GB of backlog cleared since the preceding heartbeat. No throughput
+configuration was changed by this heartbeat; do not attribute the speedup
+to an unverified cause. Both Mac and NAS remain idle/caught up on these
+folders. All reported errors are zero. Existing recovery windows and three
+queued runners remain intact. Cloud verification/deployment are still pending.
+
+### Heartbeat 2026-09-12 07:30 UTC
+
+PC catch-up is nearly finished: Arik needs 196 files / 1.284 GB, and dev
+needs six files / 104,746 bytes while scanning. Pending PC deletions have
+cleared. All reported errors are zero; NAS is idle/caught up on both folders.
+Windows 338/339 remain open until peers settle. The three existing runners
+are still queued and will proceed after tracked work settles; inspect their
+state before any deployment, avoiding interruption of active cloud work.
+Pending runtime fixes remain to deploy at an idle boundary, then restore
+memory-vault's normal NAS schedule and complete real cloud/return checks.
+
+### Heartbeat 2026-09-12 07:41 UTC — PC catch-up complete
+
+Both Mac and Omarchy now report idle, zero outstanding items/bytes, and
+zero errors across all four folders. The original catch-up jobs are no
+longer active. Arik NAS is resting paused, so its zero-filled status is
+not used as fresh evidence. The existing dev runner started tracked job 10
+at 07:37:45 UTC; NAS window 342 is scanning with five newly needed files /
+100,686 bytes and zero errors, cap 60 minutes. Cloud has not started for
+that job yet. The remaining runners must not be duplicated.
+
+Do not restart during this new active pipeline. Complete its cloud/return
+verification, then use an actual idle boundary for the three pending runtime
+fixes and restore memory-vault's NAS schedule. PC catch-up completion does
+not imply the remaining cloud cycles have completed.
+
+Ledger readback confirms catch-up jobs 4/dev and 5/Arik are done, with
+windows 338/339 each recording both peers complete (2/2). BaruchRio job 9
+window 341 also completed with 2/2 peers; it contained no cloud run and is
+not full cloud verification. Job 10/dev is the sole active tracked pipeline.
+
+### Heartbeat 2026-09-12 07:52 UTC
+
+Computer endpoints remain idle with zero outstanding items and errors on
+all four folders. Dev job 10 remains in NAS scan window 342; new source
+activity totals 20 outstanding items / 309,689 bytes, with zero errors.
+No cloud run has started. Because earlier full dev scans exceeded an hour,
+extended this recovery window from 60 to 720 minutes through the authenticated
+API, preserving its active job and avoiding a premature timeout. The three
+existing runners remain serialized; none were duplicated. Deployment and
+remaining cloud/return checks are still pending an appropriate boundary.
+
+### Heartbeat 2026-09-12 08:03 UTC — PC unreachable
+
+Omarchy failed all four Syncthing API reads; an independent SSH connection
+to 100.88.84.71:22 also timed out after eight seconds. PC catch-up was
+verified complete earlier, but current end-to-end verification cannot
+finish without this required peer. Do not reinterpret unavailable status
+as an empty or synchronized folder. Mac APIs remain reachable and error-free.
+
+Dev job 10/window 342 remains scanning with 20 needed NAS items and a
+720-minute recovery cap. The normal Arik schedule opened job 11/window 343
+(cap 90 minutes); it is scanning with two newly needed files. Neither has
+a cloud run. The same queued runners remain in place. No restart, duplicate
+job, destructive action, or bypass of peer-completion checks was performed.
+Notify the user to keep Omarchy awake/connected; continue checking for its
+return and remaining NAS scan progress on subsequent heartbeats.
+
+### Heartbeat 2026-09-12 08:15 UTC
+
+Omarchy remains unreachable on a bounded six-second direct API probe.
+Mac and NAS responded: Mac folders have zero needed bytes/errors, with dev
+still scanning; NAS windows 342/dev and 343/Arik remain scanning with the
+same small outstanding changes and zero errors. No cloud run is active.
+The existing queued runners are unchanged. The user was already notified
+of the disconnected required peer; no repeated notification, restart,
+duplicate job, or bypass of peer verification was made this check.
